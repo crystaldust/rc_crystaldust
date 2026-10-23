@@ -1,8 +1,8 @@
 # ADR-0003: MVP 以 PostgreSQL 承担分发与重试调度，通过 Dispatcher 接口保留演进空间
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-24
-- **Deciders**: Message Hub 技术负责人（待评审）
+- **Deciders**: Message Hub 技术负责人（用户确认，2026-10-24）
 - **Related**: ADR-0001、ADR-0004；`docs/spike/05-stack-evaluation.md` §B
 
 ## Context

@@ -1,8 +1,8 @@
 # ADR-0002: 实现语言采用 Go
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-24
-- **Deciders**: Message Hub 技术负责人（待评审）
+- **Deciders**: Message Hub 技术负责人（用户确认，2026-10-24）
 - **Related**: ADR-0001（自建）；`docs/spike/05-stack-evaluation.md` §A
 
 ## Context

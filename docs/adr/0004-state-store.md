@@ -1,8 +1,8 @@
 # ADR-0004: 状态存储采用 PostgreSQL，Attempt 日志同库分区并可演进到列存
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-24
-- **Deciders**: Message Hub 技术负责人（待评审）
+- **Deciders**: Message Hub 技术负责人（用户确认，2026-10-24）
 - **Related**: ADR-0003；`docs/spike/05-stack-evaluation.md` §C
 
 ## Context

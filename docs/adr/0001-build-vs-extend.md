@@ -1,8 +1,8 @@
 # ADR-0001: 基于开源组件自建，不在 Outpost / Svix 上二次开发
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-24
-- **Deciders**: Message Hub 技术负责人（待评审）
+- **Deciders**: Message Hub 技术负责人（用户确认，2026-10-24）
 - **Related**: PRD `message-hub` Phase 1；`docs/spike/01`–`04`；ADR-0002、0003、0004
 
 ## Context

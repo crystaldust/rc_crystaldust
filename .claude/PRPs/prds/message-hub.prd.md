@@ -51,8 +51,8 @@ We'll know we're right when 首批接入业务上线后：失败消息零静默�
 - [ ] 各供应商的脱敏要求（字段级哈希、加密存储范围）
 - [ ] 配置（路由、目标、策略）变更的管理方式：配置文件 + 版本库 / 管理 API / 审批流
 - [ ] 混合环境下的固定出口 IP 方案（供应商 IP 白名单）
-- [x] Outpost / Svix 二次开发 vs 组件自建的最终结论（Phase 1 输出）→ 自建，ADR-0001（待评审）
-- [x] 技术栈（语言、MQ、状态存储）的最终选型（Phase 1 输出）→ Go + PostgreSQL，ADR-0002 至 0004（待评审）
+- [x] Outpost / Svix 二次开发 vs 组件自建的最终结论（Phase 1 输出）→ 自建，ADR-0001（Accepted）
+- [x] 技术栈（语言、MQ、状态存储）的最终选型（Phase 1 输出）→ Go + PostgreSQL，ADR-0002 至 0004（Accepted）
 - [ ] 有序投递的阻塞策略：同一顺序键的前序事件进入死信时，后续事件是阻塞、跳过还是一并进入死信
 
 ---
@@ -195,7 +195,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 
 | # | Phase | Description | Status | Parallel | Depends | PRP Plan |
 |---|-------|-------------|--------|----------|---------|----------|
-| 1 | 技术验证与选型 | Outpost / Svix 对照评估，确定自建 vs 二次开发；确定语言、MQ、状态存储 | in-progress（交付物已完成，待 ADR 评审） | - | - | [plan](../plans/completed/tech-spike-and-selection.plan.md) · [report](../reports/tech-spike-and-selection-report.md) |
+| 1 | 技术验证与选型 | Outpost / Svix 对照评估，确定自建 vs 二次开发；确定语言、MQ、状态存储 | complete | - | - | [plan](../plans/completed/tech-spike-and-selection.plan.md) · [report](../reports/tech-spike-and-selection-report.md) |
 | 2 | 领域模型与契约 | 统一事件格式、配置模型（Destination / Route / Policy）、状态机、API 契约 | pending | - | 1 | - |
 | 3 | 受理与查询 | Ingest API、持久化、去重、状态查询 API、权限 | pending | with 4 | 2 | - |
 | 4 | 投递引擎 | 路由扇出、模板构造、认证、发送、成功判定、重试、死信 | pending | with 3 | 2 | - |
@@ -263,10 +263,10 @@ PENDING → IN_FLIGHT → SUCCEEDED
 | 顺序 | 按业务需要可选（按 ordering_key 有序 / 无序） | 全局有序；全部无序 | 部分场景有前后关联，其余不需要 |
 | 扇出 | 支持一个事件路由到多个目标 | 单目标 | 核心业务场景 |
 | 外部服务 | 不使用云 / 商业服务，采用开源组件或自建 | AWS EventBridge、Hookdeck、Svix Cloud | 业务决策 |
-| 开源复用 | 基于开源组件自建，系统借鉴 Outpost / Svix 的设计（[ADR-0001](../../../docs/adr/0001-build-vs-extend.md)，Proposed） | 基于 Outpost / Svix 二次开发 | 按锁定的决策规则：Outpost 82/144、Svix 88/144，均低于 101，且改动面超过 3 个核心模块；两者都存在与零静默丢失冲突的设计 |
-| 实现语言 | Go（[ADR-0002](../../../docs/adr/0002-implementation-language.md)，Proposed） | Java、TypeScript、Rust | 加权 76/85；单一二进制适合混合环境；AI 编码友好；与借鉴代码同语言 |
-| 分发与重试 | MVP 只用 PostgreSQL（SKIP LOCKED + LISTEN/NOTIFY），通过 Dispatcher 接口可演进（[ADR-0003](../../../docs/adr/0003-dispatch-and-retry-queue.md)，Proposed） | PG+Kafka、PG+Redis、PG+RabbitMQ | 加权 64/75；受理事务即 outbox，从架构上保证零静默丢失；组件最少 |
-| 状态存储 | PostgreSQL，Attempt 同库分区，可演进到列存（[ADR-0004](../../../docs/adr/0004-state-store.md)，Proposed） | MySQL 8 | 加权 58/60；部分索引与 NOTIFY 是 ADR-0003 的前提 |
+| 开源复用 | 基于开源组件自建，系统借鉴 Outpost / Svix 的设计（[ADR-0001](../../../docs/adr/0001-build-vs-extend.md)，Accepted） | 基于 Outpost / Svix 二次开发 | 按锁定的决策规则：Outpost 82/144、Svix 88/144，均低于 101，且改动面超过 3 个核心模块；两者都存在与零静默丢失冲突的设计 |
+| 实现语言 | Go（[ADR-0002](../../../docs/adr/0002-implementation-language.md)，Accepted） | Java、TypeScript、Rust | 加权 76/85；单一二进制适合混合环境；AI 编码友好；与借鉴代码同语言 |
+| 分发与重试 | MVP 只用 PostgreSQL（SKIP LOCKED + LISTEN/NOTIFY），通过 Dispatcher 接口可演进（[ADR-0003](../../../docs/adr/0003-dispatch-and-retry-queue.md)，Accepted） | PG+Kafka、PG+Redis、PG+RabbitMQ | 加权 64/75；受理事务即 outbox，从架构上保证零静默丢失；组件最少 |
+| 状态存储 | PostgreSQL，Attempt 同库分区，可演进到列存（[ADR-0004](../../../docs/adr/0004-state-store.md)，Accepted） | MySQL 8 | 加权 58/60；部分索引与 NOTIFY 是 ADR-0003 的前提 |
 | 部署 | 混合环境 | 单一云 / 单一 IDC | 业务要求 |
 | 范围边界 | 只聚焦 Hub 模块本身 | 同时设计上下游交互 | 系统间交互在更高维度讨论 |
 | 交付方式 | AI Vibe Coding，尽快上线 | 传统排期 | 业务决策；以规格与测试作质量护栏 |
