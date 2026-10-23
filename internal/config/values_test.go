@@ -105,6 +105,25 @@ func TestDurationYAML(t *testing.T) {
 	}
 }
 
+func TestStatusMatcherString(t *testing.T) {
+	tests := []struct {
+		matcher StatusMatcher
+		want    string
+	}{
+		{StatusMatcher{Code: 200}, "200"},
+		{StatusMatcher{Code: 429}, "429"},
+		{StatusMatcher{Class: 2}, "2xx"},
+		{StatusMatcher{Class: 5}, "5xx"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := tt.matcher.String(); got != tt.want {
+				t.Fatalf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStatusMatcher(t *testing.T) {
 	tests := []struct {
 		json    string

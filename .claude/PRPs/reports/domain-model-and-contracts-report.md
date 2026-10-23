@@ -104,6 +104,13 @@ Phase 3 与 Phase 4 现在可以基于这些契约并行开发。
 | `db/embed_test.go`、`db/migrations_integration_test.go` | 迁移内嵌；表、约束、分区、up / down / up |
 | `internal/contracts/*_test.go` | 黄金用例结构、覆盖面、哈希与 HMAC 复算、退避公式复算、约 45 个加载器错误路径 |
 
+## Post-implementation: 覆盖缺口补齐（2026-10-24）
+
+- 补齐 6 处缺口（详见 `docs/testing/coverage-gaps.md` 第 1 节），总覆盖率从 96.1% 提升到 97.2%，`internal/config` 从 94.7% 提升到 96.6%
+- 剩余 22 个未覆盖代码块都是防御性分支，已按 D1–D7 分类记录理由与重新评估条件
+- 覆盖率之外的行为缺口（B1–B8）已标注负责阶段与完成标准
+- 新增 `make cover-gaps`（`scripts/cover-gaps.sh`），可随时重新生成未覆盖列表并与文档对照
+
 ## Next Steps
 
 - [ ] 代码评审：`/code-review`

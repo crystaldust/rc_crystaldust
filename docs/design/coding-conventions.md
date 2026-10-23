@@ -65,6 +65,7 @@ db/                 内嵌 SQL 迁移
 - 集成测试使用 build tag `//go:build integration`，通过 testcontainers 启动依赖
 - 黄金用例（`testdata/contracts/`）是行为契约；修改黄金值必须同时修改规格文档
 - 覆盖率 ≥ 80%（`internal/domain` ≥ 90%）
+- 未覆盖的代码必须记录在 `docs/testing/coverage-gaps.md` 中（分类与理由）；`make cover-gaps` 的输出发生变化时，在同一次提交中更新该文件
 - 测试中不得依赖真实外部服务或当前时间（时间通过参数或时钟接口注入）
 
 ## 9. 依赖

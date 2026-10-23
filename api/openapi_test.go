@@ -163,6 +163,12 @@ func TestServerOnlyRules(t *testing.T) {
 			wantTooLarge: true,
 		},
 		{
+			// domain-model.md §13.1: the RFC 3339 pattern accepts it; time.Parse rejects it.
+			name:          "impossible calendar date",
+			body:          `{"source_event_id":"a","event_type":"order.paid","occurred_at":"2026-02-31T08:30:00Z","payload":{}}`,
+			wantBadFields: "occurred_at",
+		},
+		{
 			name:          "metadata key with disallowed character",
 			body:          `{"source_event_id":"a","event_type":"order.paid","occurred_at":"2026-10-24T08:30:00Z","payload":{},"metadata":{"bad key":"v"}}`,
 			wantBadFields: "metadata.bad key",

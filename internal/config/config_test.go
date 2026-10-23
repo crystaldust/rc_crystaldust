@@ -240,6 +240,51 @@ func TestDuplicateRouteWarning(t *testing.T) {
 	}
 }
 
+func TestAccessorsReturnCopiesOfArraysInBody(t *testing.T) {
+	// Arrange: a body template holding an array of objects and scalars.
+	minimal := string(mustRead(t, "testdata/valid/minimal.yaml"))
+	withArray := strings.Replace(minimal, "        status: paid\n",
+		"        status: paid\n        items: [{sku: A1}, 2]\n", 1)
+	cfg, err := Parse([]byte(withArray))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	// Act: mutate the array and the object inside it on the returned copy.
+	d, _ := cfg.Destination("crm")
+	items := d.Request.Body.(map[string]any)["items"].([]any)
+	items[0].(map[string]any)["sku"] = "tampered"
+	items[1] = "tampered"
+
+	// Assert
+	d2, _ := cfg.Destination("crm")
+	items2 := d2.Request.Body.(map[string]any)["items"].([]any)
+	if items2[0].(map[string]any)["sku"] != "A1" || items2[1] == "tampered" {
+		t.Fatalf("array mutation leaked into config: %v", items2)
+	}
+}
+
+func TestOmittedOrderingDefaultsToModeNone(t *testing.T) {
+	// Arrange
+	minimal := string(mustRead(t, "testdata/valid/minimal.yaml"))
+	noOrdering := strings.Replace(minimal, "    ordering: { mode: none }\n", "", 1)
+	if noOrdering == minimal {
+		t.Fatal("fixture no longer contains the ordering line this test removes")
+	}
+
+	// Act
+	cfg, err := Parse([]byte(noOrdering))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	p, _ := cfg.Policy("default")
+	if p.Ordering.Mode != OrderingNone || p.Ordering.OnPredecessorDead != "" {
+		t.Fatalf("Ordering = %+v, want mode none without on_predecessor_dead", p.Ordering)
+	}
+}
+
 func TestPerKeyDefaultsToBlock(t *testing.T) {
 	cfg := mustLoad(t, "testdata/valid/per_key_default.yaml")
 	p, _ := cfg.Policy("default")
