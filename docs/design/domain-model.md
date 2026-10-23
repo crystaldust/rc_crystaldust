@@ -406,3 +406,68 @@ routes:
 | 413 | `payload_too_large` |
 | 429 | `rate_limited`（预留，Phase 6） |
 | 500 | `internal` |
+
+---
+
+## 13. 补充约定
+
+> 以下约定在 Phase 2 编写契约文件时确定，用于消除前文未覆盖的细节。契约文件与测试已按这些约定实现。
+
+### 13.1 受理
+
+| 项 | 约定 |
+|---|---|
+| payload 大小 | 按**请求中 `payload` 字段的原始字节数**计算（含空白），≤ 262144 字节；不重新序列化后再计算 |
+| 重复的 JSON 键 | 当前实现以最后出现的值为准。Phase 3 在 HTTP 层加上严格解析，拒绝重复键（返回 400） |
+| 日期合法性 | 以 Go `time.Parse(time.RFC3339)` 为准；`2026-02-31` 这类不存在的日期返回 400（OpenAPI 的格式正则无法表达，属于服务端规则） |
+| metadata key 的格式 | 由服务端校验（OpenAPI 3.0 无法表达 key 的约束） |
+| 空字符串 | 可选字符串字段不允许为空字符串（长度至少为 1）；数据库中"缺省"一律存为 NULL |
+
+### 13.2 模板
+
+| 项 | 约定 |
+|---|---|
+| URL 中的转义 | `?` 之前的表达式结果按**路径段**转义（`url.PathEscape`，`/` 也转义）；`?` 之后的表达式结果按**查询参数**转义（`url.QueryEscape`）。因此 URL 中**不需要也不应使用** `urlencode`，否则会被转义两次 |
+| `format_time unix` / `unix_ms` 的类型 | Body 中单表达式时结果为 **number**；嵌入文本或用在 Header、URL 中时为字符串 |
+| `format_time rfc3339` | 转为 UTC，秒级精度（舍弃小数部分），与时间的默认字符串化相同 |
+| 紧凑 JSON 的键顺序 | object 序列化时**按键排序**（与 Go `encoding/json` 对 map 的处理一致） |
+| `request.body` 用在非 Header 位置 | `syntax` 错误（可在加载配置时静态检测） |
+| `hmac_*` 引用未在 `secrets` 中声明的名字 | `bad_argument`（可在加载配置时静态检测） |
+| 可选事件字段缺省（如 `event.idempotency_key` 未提供） | `missing_path`，需要用 `default` 兜底 |
+
+### 13.3 成功判定与重试
+
+| 项 | 约定 |
+|---|---|
+| `eq` / `in` 比较 | 类型不同即不相等，例如 `"0"` 与 `0` 不相等 |
+| Content-Type | 判定不看 Content-Type，只看响应体是否为合法 JSON；空响应体（如 204）不是 JSON |
+| Retry-After | 支持秒数与 HTTP 日期两种格式；HTTP 日期以收到响应的时刻为基准换算；负数、无法解析的值忽略 |
+
+### 13.4 API
+
+| 项 | 约定 |
+|---|---|
+| `/readyz` 未就绪 | 返回 503，`error.code = internal` |
+| 时间范围过滤 | 事件用 `received_from`（含）/ `received_to`（不含）；投递用 `created_from`（含）/ `created_to`（不含） |
+| Delivery 详情的 attempts 分页 | 复用 `cursor` / `limit`，`meta.next_cursor` 指向 attempts 的下一页 |
+| replay / skip 请求体 | `reason` 必填，1–500 字符；响应 `data` 为 OperatorAction 记录 |
+| 读取响应中的可选字段 | 缺省的可选字段返回 `null`；`metadata` 缺省时返回 `{}` |
+| 事件列表 | 列表项不包含 payload 与 deliveries，需要时调用详情接口 |
+| 路径参数格式错误 | 非法 UUID 返回 400 `validation_failed` |
+
+### 13.5 配置
+
+| 项 | 约定 |
+|---|---|
+| Principal 的认证 | 配置中只有 `env:` 引用；运行时读取环境变量得到 key 的 SHA-256，再构建"哈希 → Principal"查找表（Phase 3） |
+| 重复的 `api_key_sha256_ref` | 加载失败，因为认证会产生歧义 |
+| ConfigHash 的计算范围 | 对**填充默认值之后**的配置计算；修改注释、显式写出默认值不改变哈希；duration 按原文参与计算（`5s` 与 `5000ms` 哈希不同） |
+| 重复路由的 warning | 同一 `event_type` 的两个 route 指向同一 destination 即给出 warning，不分析 `sources` / `match` 条件是否重叠 |
+
+### 13.6 数据库
+
+| 项 | 约定 |
+|---|---|
+| OperatorAction 的外键 | **不级联删除**，审计记录不会被静默删除；因此删除带有 replay / skip 历史的事件前，需要先按保留策略处理审计记录（Phase 5） |
+| `deliveries.ingest_seq` | 从所属事件复制而来，不建外键；用于有序领取时避免关联查询 |
+| 待领取索引 | Phase 2 为 `(scheduled_at) WHERE status IN (...)`；Phase 4 实现按目标公平领取时，若 EXPLAIN 显示需要，再改为 `(destination_id, scheduled_at)` |

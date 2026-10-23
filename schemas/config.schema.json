@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://messagehub.internal/schemas/config.schema.json",
+  "title": "Message Hub configuration",
+  "description": "Structure of the Message Hub YAML configuration (docs/design/domain-model.md §11). Semantic rules (references, uniqueness, event_type shape, timeout < backoff.max) are enforced by internal/config.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "principals", "policies", "destinations", "routes"],
+  "properties": {
+    "version": { "const": 1 },
+    "principals": { "type": "array", "items": { "$ref": "#/$defs/principal" } },
+    "policies": { "type": "array", "items": { "$ref": "#/$defs/policy" } },
+    "destinations": { "type": "array", "items": { "$ref": "#/$defs/destination" } },
+    "routes": { "type": "array", "items": { "$ref": "#/$defs/route" } }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+    "duration": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+    "envRef": { "type": "string", "pattern": "^env:[A-Z][A-Z0-9_]*$" },
+    "statusMatcher": {
+      "oneOf": [
+        { "type": "integer", "minimum": 100, "maximum": 599 },
+        { "type": "string", "pattern": "^[1-5]xx$" }
+      ]
+    },
+    "statusList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/statusMatcher" },
+      "uniqueItems": true
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "op"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "op": { "enum": ["eq", "ne", "in", "exists", "not_exists"] },
+        "value": true
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "op": { "enum": ["eq", "ne"] } } },
+          "then": { "required": ["value"] }
+        },
+        {
+          "if": { "properties": { "op": { "const": "in" } } },
+          "then": { "required": ["value"], "properties": { "value": { "type": "array" } } }
+        },
+        {
+          "if": { "properties": { "op": { "enum": ["exists", "not_exists"] } } },
+          "then": { "properties": { "value": false } }
+        }
+      ]
+    },
+    "principal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "api_key_sha256_ref"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "role": { "enum": ["source", "viewer", "operator"] },
+        "api_key_sha256_ref": { "$ref": "#/$defs/envRef" }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "timeout", "retry", "success"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "timeout": { "$ref": "#/$defs/duration" },
+        "retry": { "$ref": "#/$defs/retry" },
+        "success": { "$ref": "#/$defs/success" },
+        "ordering": { "$ref": "#/$defs/ordering" }
+      }
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_attempts", "backoff"],
+      "properties": {
+        "max_attempts": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "backoff": { "$ref": "#/$defs/backoff" },
+        "retry_on": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": { "status": { "$ref": "#/$defs/statusList" } }
+        }
+      }
+    },
+    "backoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["initial", "multiplier", "max"],
+      "properties": {
+        "initial": { "$ref": "#/$defs/duration" },
+        "multiplier": { "type": "number", "minimum": 1 },
+        "max": { "$ref": "#/$defs/duration" },
+        "jitter": { "type": "number", "minimum": 0, "exclusiveMaximum": 1 }
+      }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "allOf": [{ "$ref": "#/$defs/statusList" }, { "minItems": 1 }] },
+        "body": { "type": "array", "items": { "$ref": "#/$defs/rule" } }
+      }
+    },
+    "ordering": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["none", "per_key"] },
+        "on_predecessor_dead": { "enum": ["block", "skip"] }
+      },
+      "if": { "properties": { "mode": { "const": "per_key" } } },
+      "then": true,
+      "else": { "properties": { "on_predecessor_dead": false } }
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "policy", "request"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "policy": { "$ref": "#/$defs/id" },
+        "max_in_flight": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "secrets": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "additionalProperties": { "$ref": "#/$defs/envRef" }
+        },
+        "auth": { "$ref": "#/$defs/auth" },
+        "request": { "$ref": "#/$defs/request" }
+      }
+    },
+    "auth": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "none" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "token_url", "client_id_ref", "client_secret_ref"],
+          "properties": {
+            "type": { "const": "oauth2_client_credentials" },
+            "token_url": { "type": "string", "pattern": "^https?://" },
+            "client_id_ref": { "$ref": "#/$defs/envRef" },
+            "client_secret_ref": { "$ref": "#/$defs/envRef" },
+            "scopes": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "uniqueItems": true
+            }
+          }
+        }
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "url"],
+      "properties": {
+        "method": { "enum": ["POST", "PUT", "PATCH"] },
+        "url": { "type": "string", "minLength": 1 },
+        "headers": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$" },
+          "additionalProperties": { "type": "string" }
+        },
+        "body": true
+      }
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "event_type", "destinations"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "event_type": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "sources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/id" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "match": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
+        "destinations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/id" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

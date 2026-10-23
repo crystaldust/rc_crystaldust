@@ -1,0 +1,14 @@
+{
+  "source_event_id": "ord-1001",
+  "event_type": "order.paid",
+  "occurred_at": "2026-10-24T16:30:00.123+08:00",
+  "payload": {
+    "order_id": "1001"
+  },
+  "idempotency_key": "pay-1001",
+  "ordering_key": "contact-c-42",
+  "metadata": {
+    "trace_id": "4bf92f3577b34da6",
+    "tenant.region": "cn-east-1"
+  }
+}

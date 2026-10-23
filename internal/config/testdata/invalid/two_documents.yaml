@@ -1,0 +1,35 @@
+version: 1
+principals:
+  - id: order-service
+    role: source
+    api_key_sha256_ref: env:HUB_KEY_ORDER_SERVICE_SHA256
+  - id: support-viewer
+    role: viewer
+    api_key_sha256_ref: env:HUB_KEY_SUPPORT_VIEWER_SHA256
+policies:
+  - id: default
+    timeout: 5s
+    retry:
+      max_attempts: 8
+      backoff: { initial: 5s, multiplier: 2.0, max: 1h, jitter: 0.2 }
+      retry_on: { status: [408, 429, "5xx"] }
+    success:
+      status: ["2xx"]
+    ordering: { mode: none }
+destinations:
+  - id: crm
+    policy: default
+    request:
+      method: POST
+      url: "https://crm.example.com/contacts/{{ event.payload.contact_id }}"
+      headers:
+        Content-Type: application/json
+      body:
+        status: paid
+routes:
+  - id: order-paid
+    event_type: order.paid
+    sources: [order-service]
+    destinations: [crm]
+---
+version: 1

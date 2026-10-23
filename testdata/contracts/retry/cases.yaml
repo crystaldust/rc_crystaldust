@@ -1,0 +1,98 @@
+# Golden cases for retry delay (docs/design/domain-model.md §7.4).
+#
+#   base(n)  = min(max, initial × multiplier^(n−1))        n = retry_number ≥ 1
+#   delay    = base(n)                                     (jitter is always 0)
+#   if status_code ∈ {429, 503} and Retry-After is valid:
+#       delay = min(max, max(delay, retry_after))
+#
+# `retry_after` is the raw header value (seconds). `status_code` 0 / omitted
+# means the attempt had no HTTP response (e.g. a timeout). HTTP-date values
+# are left out because they depend on the current time.
+
+cases:
+  - name: first retry equals initial
+    backoff: &standard { initial: 5s, multiplier: 2.0, max: 1h, jitter: 0 }
+    retry_number: 1
+    want_delay: 5s
+
+  - name: second retry doubles
+    backoff: *standard
+    retry_number: 2
+    want_delay: 10s
+
+  - name: fourth retry grows exponentially
+    backoff: *standard
+    retry_number: 4
+    want_delay: 40s
+
+  - name: delay is capped at max
+    backoff: { initial: 5s, multiplier: 2.0, max: 1m, jitter: 0 }
+    retry_number: 5
+    want_delay: 1m
+
+  - name: multiplier one keeps delay constant
+    backoff: { initial: 5s, multiplier: 1.0, max: 1h, jitter: 0 }
+    retry_number: 7
+    want_delay: 5s
+
+  - name: fractional multiplier
+    backoff: { initial: 2s, multiplier: 1.5, max: 1h, jitter: 0 }
+    retry_number: 3
+    want_delay: 4.5s
+
+  - name: millisecond initial
+    backoff: { initial: 500ms, multiplier: 3.0, max: 1h, jitter: 0 }
+    retry_number: 3
+    want_delay: 4.5s
+
+  - name: large retry number does not overflow
+    backoff: *standard
+    retry_number: 60
+    want_delay: 1h
+
+  - name: retry-after larger than computed wins on 429
+    backoff: *standard
+    retry_number: 1
+    status_code: 429
+    retry_after: "30"
+    want_delay: 30s
+
+  - name: retry-after larger than computed wins on 503
+    backoff: *standard
+    retry_number: 2
+    status_code: 503
+    retry_after: "120"
+    want_delay: 2m
+
+  - name: retry-after smaller than computed is ignored
+    backoff: *standard
+    retry_number: 3
+    status_code: 503
+    retry_after: "5"
+    want_delay: 20s
+
+  - name: retry-after above max is capped
+    backoff: { initial: 5s, multiplier: 2.0, max: 1m, jitter: 0 }
+    retry_number: 1
+    status_code: 429
+    retry_after: "3600"
+    want_delay: 1m
+
+  - name: retry-after on 500 is ignored
+    backoff: *standard
+    retry_number: 1
+    status_code: 500
+    retry_after: "30"
+    want_delay: 5s
+
+  - name: invalid retry-after on 429 is ignored
+    backoff: *standard
+    retry_number: 1
+    status_code: 429
+    retry_after: soon
+    want_delay: 5s
+
+  - name: no response uses computed delay
+    backoff: *standard
+    retry_number: 3
+    want_delay: 20s

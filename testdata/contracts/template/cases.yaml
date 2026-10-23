@@ -1,0 +1,508 @@
+# Golden cases for the template language (docs/design/domain-model.md §7.1).
+#
+# Each case renders `template` at `location` against `event`, `secrets`,
+# optional `delivery` and (header only) `request_body`, then expects either
+# `want` (body: the JSON value; header/url: the string) or `want_error`
+# (syntax | missing_path | unknown_function | bad_argument).
+#
+# Hash, HMAC and base64 values were computed with real tooling and are
+# recomputed by internal/contracts/cases_test.go.
+#
+# Conventions that keep the expectations unambiguous:
+# - every object in the payload lists its keys in sorted order, so compact
+#   JSON output is identical whether the engine keeps insertion order or sorts;
+# - timestamps are quoted so YAML never turns them into native times;
+# - `now` is only used in an error case (its value is non-deterministic).
+
+cases:
+  # ---------------------------------------------------------------- types --
+  - name: body single expression keeps number type
+    location: body
+    template:
+      amount: "{{event.payload.amount}}"
+    event: &event
+      id: 01920000-0000-7000-8000-000000000001
+      source: order-service
+      source_event_id: ord-1001
+      event_type: order.paid
+      occurred_at: "2026-10-24T08:30:00Z"
+      received_at: "2026-10-24T08:30:01.250Z"
+      idempotency_key: idem-1001
+      ordering_key: cust-42
+      payload:
+        amount: 199.5
+        coupon: null
+        customer:
+          id: 42
+          name: Ann
+        email: "  Ann@Example.COM  "
+        items:
+          - qty: 2
+            sku: SKU-1
+          - qty: 1
+            sku: SKU-2
+        local_paid_at: "2026-10-24T16:30:00+08:00"
+        note: "hello world&x=1"
+        order_id: "A/B 1"
+        paid: true
+        quantity: 3
+      metadata:
+        tenant: acme
+    secrets: &secrets
+      SIGNING_KEY: whsec_test_123
+      BASIC_CREDENTIALS: "user:pass"
+    want:
+      amount: 199.5
+
+  - name: body single expression keeps bool type
+    location: body
+    template:
+      paid: "{{ event.payload.paid }}"
+    event: *event
+    secrets: *secrets
+    want:
+      paid: true
+
+  - name: body single expression keeps object type
+    location: body
+    template:
+      customer: "{{event.payload.customer}}"
+    event: *event
+    secrets: *secrets
+    want:
+      customer:
+        id: 42
+        name: Ann
+
+  - name: body single expression keeps null type
+    location: body
+    template:
+      coupon: "{{event.payload.coupon}}"
+    event: *event
+    secrets: *secrets
+    want:
+      coupon: null
+
+  - name: body single expression keeps array type
+    location: body
+    template: "{{event.payload.items}}"
+    event: *event
+    secrets: *secrets
+    want:
+      - qty: 2
+        sku: SKU-1
+      - qty: 1
+        sku: SKU-2
+
+  - name: body single expression tolerates surrounding whitespace
+    location: body
+    template:
+      quantity: "  {{ event.payload.quantity }}  "
+    event: *event
+    secrets: *secrets
+    want:
+      quantity: 3
+
+  - name: body non-string leaves and literal strings pass through unchanged
+    location: body
+    template:
+      status: paid
+      version: 2
+      test: false
+      extra: null
+      tags: [a, b]
+    event: *event
+    secrets: *secrets
+    want:
+      status: paid
+      version: 2
+      test: false
+      extra: null
+      tags: [a, b]
+
+  - name: body time value renders as rfc3339 utc string
+    location: body
+    template:
+      paid_at: "{{event.occurred_at}}"
+    event: *event
+    secrets: *secrets
+    want:
+      paid_at: "2026-10-24T08:30:00Z"
+
+  # ------------------------------------------------------- embedded text --
+  - name: embedded number is stringified
+    location: body
+    template: "amount={{event.payload.amount}}"
+    event: *event
+    secrets: *secrets
+    want: "amount=199.5"
+
+  - name: embedded bool is stringified
+    location: body
+    template: "paid={{event.payload.paid}}"
+    event: *event
+    secrets: *secrets
+    want: "paid=true"
+
+  - name: embedded null becomes empty string
+    location: body
+    template: "coupon=[{{event.payload.coupon}}]"
+    event: *event
+    secrets: *secrets
+    want: "coupon=[]"
+
+  - name: embedded object becomes compact json
+    location: body
+    template: "customer={{event.payload.customer}}"
+    event: *event
+    secrets: *secrets
+    want: 'customer={"id":42,"name":"Ann"}'
+
+  - name: embedded time is rfc3339 utc with second precision
+    location: header
+    template: "received {{event.received_at}}"
+    event: *event
+    secrets: *secrets
+    want: "received 2026-10-24T08:30:01Z"
+
+  # ---------------------------------------------------------------- paths --
+  - name: array index path
+    location: body
+    template:
+      second_sku: "{{event.payload.items.1.sku}}"
+    event: *event
+    secrets: *secrets
+    want:
+      second_sku: SKU-2
+
+  - name: event envelope fields and metadata
+    location: header
+    template: "{{event.source}}/{{event.event_type}}/{{event.source_event_id}}/{{event.idempotency_key}}/{{event.ordering_key}}/{{event.metadata.tenant}}"
+    event: *event
+    secrets: *secrets
+    want: "order-service/order.paid/ord-1001/idem-1001/cust-42/acme"
+
+  - name: delivery id and attempt
+    location: header
+    template: "{{delivery.id}}#{{delivery.attempt}}"
+    event: *event
+    secrets: *secrets
+    delivery:
+      id: 01920000-0000-7000-8000-0000000000d1
+      attempt: 2
+    want: "01920000-0000-7000-8000-0000000000d1#2"
+
+  - name: secret in header
+    location: header
+    template: "Bearer {{secret.SIGNING_KEY}}"
+    event: *event
+    secrets: *secrets
+    want: "Bearer whsec_test_123"
+
+  # ------------------------------------------------------------ functions --
+  - name: lower
+    location: header
+    template: "{{ event.payload.customer.name | lower }}"
+    event: *event
+    secrets: *secrets
+    want: "ann"
+
+  - name: upper
+    location: header
+    template: "{{event.metadata.tenant|upper}}"
+    event: *event
+    secrets: *secrets
+    want: "ACME"
+
+  - name: upper stringifies a bool input first
+    location: header
+    template: "{{ event.payload.paid | upper }}"
+    event: *event
+    secrets: *secrets
+    want: "TRUE"
+
+  - name: trim
+    location: header
+    template: "[{{ event.payload.email | trim }}]"
+    event: *event
+    secrets: *secrets
+    want: "[Ann@Example.COM]"
+
+  - name: chain lower trim sha256
+    location: body
+    template:
+      email_hash: "{{ event.payload.email | lower | trim | sha256 }}"
+    event: *event
+    secrets: *secrets
+    want:
+      email_hash: 71d4f55f72fa128dfb468a1a3901507c804b74316488744d769d7f4b16696476
+
+  - name: sha256 stringifies a number input first
+    location: header
+    template: "{{ event.payload.amount | sha256 }}"
+    event: *event
+    secrets: *secrets
+    want: 3b67709840a1cbcd24837c9bfaeef1837a739ac8278dd4e9204a2ed406944d6d
+
+  - name: base64 of event field
+    location: header
+    template: "{{ event.source_event_id | base64 }}"
+    event: *event
+    secrets: *secrets
+    want: "b3JkLTEwMDE="
+
+  - name: base64 basic auth from secret
+    location: header
+    template: "Basic {{ secret.BASIC_CREDENTIALS | base64 }}"
+    event: *event
+    secrets: *secrets
+    want: "Basic dXNlcjpwYXNz"
+
+  # urlencode is exercised in a body string on purpose: in a URL the result
+  # would additionally be path-segment escaped (spec ambiguity, see report).
+  - name: urlencode uses query escaping
+    location: body
+    template:
+      query: "q={{ event.payload.note | urlencode }}"
+    event: *event
+    secrets: *secrets
+    want:
+      query: "q=hello+world%26x%3D1"
+
+  - name: default replaces missing path
+    location: body
+    template:
+      discount: "{{ event.payload.discount | default 0 }}"
+    event: *event
+    secrets: *secrets
+    want:
+      discount: 0
+
+  - name: default replaces missing intermediate path
+    location: body
+    template:
+      tier: '{{ event.payload.loyalty.tier | default "none" }}'
+    event: *event
+    secrets: *secrets
+    want:
+      tier: none
+
+  - name: default replaces null
+    location: body
+    template:
+      coupon: '{{ event.payload.coupon | default "NONE" }}'
+    event: *event
+    secrets: *secrets
+    want:
+      coupon: NONE
+
+  - name: default keeps present value
+    location: body
+    template:
+      quantity: "{{ event.payload.quantity | default 1 }}"
+    event: *event
+    secrets: *secrets
+    want:
+      quantity: 3
+
+  - name: format_time rfc3339 drops sub-second precision
+    location: header
+    template: "{{ event.received_at | format_time rfc3339 }}"
+    event: *event
+    secrets: *secrets
+    want: "2026-10-24T08:30:01Z"
+
+  - name: format_time unix in header
+    location: header
+    template: "{{ event.occurred_at | format_time unix }}"
+    event: *event
+    secrets: *secrets
+    want: "1792830600"
+
+  - name: format_time unix accepts an rfc3339 string with offset
+    location: header
+    template: "{{ event.payload.local_paid_at | format_time unix }}"
+    event: *event
+    secrets: *secrets
+    want: "1792830600"
+
+  # Embedded so the result is a string regardless of whether the engine
+  # types unix / unix_ms as number or string (spec says "string / number").
+  - name: format_time unix_ms embedded
+    location: body
+    template: "ts={{ event.received_at | format_time unix_ms }}"
+    event: *event
+    secrets: *secrets
+    want: "ts=1792830601250"
+
+  - name: to_string turns number into string
+    location: body
+    template:
+      quantity: "{{ event.payload.quantity | to_string }}"
+    event: *event
+    secrets: *secrets
+    want:
+      quantity: "3"
+
+  - name: to_string turns object into compact json string
+    location: body
+    template:
+      customer: "{{ event.payload.customer | to_string }}"
+    event: *event
+    secrets: *secrets
+    want:
+      customer: '{"id":42,"name":"Ann"}'
+
+  - name: json serialises array compactly
+    location: body
+    template:
+      items_json: "{{ event.payload.items | json }}"
+    event: *event
+    secrets: *secrets
+    want:
+      items_json: '[{"qty":2,"sku":"SKU-1"},{"qty":1,"sku":"SKU-2"}]'
+
+  - name: json quotes a string
+    location: header
+    template: "{{ event.payload.customer.name | json }}"
+    event: *event
+    secrets: *secrets
+    want: '"Ann"'
+
+  - name: header hmac_sha256_hex signs request body
+    location: header
+    template: "sha256={{ request.body | hmac_sha256_hex secret.SIGNING_KEY }}"
+    event: *event
+    secrets: *secrets
+    request_body: '{"order_id":"ord-1001","amount":199.5}'
+    want: "sha256=56bdcb932ee1f2a688700e83b1a8832c6033134580bc5ccc84f69b3066857b08"
+
+  - name: header hmac_sha256_base64 signs request body
+    location: header
+    template: "{{request.body|hmac_sha256_base64 secret.SIGNING_KEY}}"
+    event: *event
+    secrets: *secrets
+    request_body: '{"order_id":"ord-1001","amount":199.5}'
+    want: "Vr3Lky7h8qaIcA6DsaiDLGAzE0WAvFzMhPabMGaFewg="
+
+  # ------------------------------------------------------------------ url --
+  - name: url expression is path-segment escaped and literals are untouched
+    location: url
+    template: "https://api.example.com/v1/orders/{{event.payload.order_id}}/status?src={{event.source}}"
+    event: *event
+    secrets: *secrets
+    want: "https://api.example.com/v1/orders/A%2FB%201/status?src=order-service"
+
+  - name: url number expression
+    location: url
+    template: "https://api.example.com/v1/customers/{{event.payload.customer.id}}"
+    event: *event
+    secrets: *secrets
+    want: "https://api.example.com/v1/customers/42"
+
+  # §13.2: expressions after `?` are query-escaped (url.QueryEscape), not path-escaped.
+  - name: url query expression is query escaped
+    location: url
+    template: "https://api.example.com/v1/contacts?email={{event.payload.email}}"
+    event: *event
+    secrets: *secrets
+    want: "https://api.example.com/v1/contacts?email=++Ann%40Example.COM++"
+
+  # §13.2: format_time unix as a single body expression yields a number.
+  - name: format_time unix single body expression is a number
+    location: body
+    template:
+      ts: "{{ event.occurred_at | format_time unix }}"
+    event: *event
+    secrets: *secrets
+    want:
+      ts: 1792830600
+
+  # --------------------------------------------------------------- errors --
+  - name: unterminated expression is a syntax error
+    location: body
+    template:
+      order: "{{ event.payload.order_id"
+    event: *event
+    secrets: *secrets
+    want_error: syntax
+
+  - name: pipe without path is a syntax error
+    location: header
+    template: "{{ | lower }}"
+    event: *event
+    secrets: *secrets
+    want_error: syntax
+
+  - name: missing payload path
+    location: body
+    template:
+      x: "{{ event.payload.nope }}"
+    event: *event
+    secrets: *secrets
+    want_error: missing_path
+
+  - name: null in the middle of a path is missing
+    location: header
+    template: "{{ event.payload.coupon.code }}"
+    event: *event
+    secrets: *secrets
+    want_error: missing_path
+
+  - name: descending into a number is missing
+    location: header
+    template: "{{ event.payload.amount.cents }}"
+    event: *event
+    secrets: *secrets
+    want_error: missing_path
+
+  - name: array index out of range is missing
+    location: url
+    template: "https://api.example.com/skus/{{ event.payload.items.5.sku }}"
+    event: *event
+    secrets: *secrets
+    want_error: missing_path
+
+  - name: unknown function
+    location: header
+    template: "{{ event.payload.order_id | reverse }}"
+    event: *event
+    secrets: *secrets
+    want_error: unknown_function
+
+  - name: hmac with non-secret argument
+    location: header
+    template: "{{ request.body | hmac_sha256_hex event.source }}"
+    event: *event
+    secrets: *secrets
+    request_body: '{"order_id":"ord-1001","amount":199.5}'
+    want_error: bad_argument
+
+  - name: format_time with unsupported layout
+    location: header
+    template: "{{ event.occurred_at | format_time iso8601 }}"
+    event: *event
+    secrets: *secrets
+    want_error: bad_argument
+
+  - name: format_time on now with unsupported layout
+    location: header
+    template: "{{ now | format_time yyyy }}"
+    event: *event
+    secrets: *secrets
+    want_error: bad_argument
+
+  - name: argument given to a zero-argument function
+    location: header
+    template: "{{ event.metadata.tenant | lower 1 }}"
+    event: *event
+    secrets: *secrets
+    want_error: bad_argument
+
+  - name: default without argument
+    location: body
+    template:
+      x: "{{ event.payload.coupon | default }}"
+    event: *event
+    secrets: *secrets
+    want_error: bad_argument

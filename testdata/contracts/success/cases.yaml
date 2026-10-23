@@ -1,0 +1,336 @@
+# Golden cases for success evaluation and outcome classification
+# (docs/design/domain-model.md §7.2 and §7.3, steps 3-6).
+#
+# Each case gives the policy's `success` and `retry_on`, then either an HTTP
+# `response` (body is the raw string received) or a `network_error`
+# (connect | dns | tls | timeout), and the expected `want_outcome`
+# (success | retryable | permanent). render_error / infra_error are out of
+# scope here: they are decided before a response exists.
+
+cases:
+  # ---------------------------------------------------------- PoC S3 ------
+  - name: poc s3 business error code with 200 is permanent
+    success: &success_code0
+      status: ["2xx"]
+      body:
+        - { path: code, op: eq, value: 0 }
+    retry_on: &retry_default
+      status: [408, 425, 429, "5xx"]
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"code":1001}'
+    want_outcome: permanent
+
+  - name: business code zero with 200 is success
+    success: *success_code0
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"code":0,"msg":"ok"}'
+    want_outcome: success
+
+  # ------------------------------------------------------------ operators --
+  - name: eq compares numbers by value 0.0 equals 0
+    success: *success_code0
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"code":0.0}'
+    want_outcome: success
+
+  - name: eq rule value 0.0 equals body 0
+    success:
+      status: ["2xx"]
+      body:
+        - { path: code, op: eq, value: 0.0 }
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"code":0}'
+    want_outcome: success
+
+  # Conservative reading: numeric comparison applies only when both sides are
+  # numbers; a JSON string "0" is not equal to the number 0.
+  - name: eq does not coerce string to number
+    success: *success_code0
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"code":"0"}'
+    want_outcome: permanent
+
+  - name: eq on nested array path
+    success:
+      status: ["2xx"]
+      body:
+        - { path: data.result.0.status, op: eq, value: done }
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"data":{"result":[{"status":"done"}]}}'
+    want_outcome: success
+
+  - name: ne on missing path is satisfied
+    success:
+      status: ["2xx"]
+      body:
+        - { path: error, op: ne, value: fatal }
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"code":0}'
+    want_outcome: success
+
+  - name: ne with equal value is not satisfied
+    success:
+      status: ["2xx"]
+      body:
+        - { path: error, op: ne, value: fatal }
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"error":"fatal"}'
+    want_outcome: permanent
+
+  - name: in matches one element
+    success:
+      status: ["2xx"]
+      body:
+        - { path: status, op: in, value: [ok, accepted] }
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"status":"accepted"}'
+    want_outcome: success
+
+  - name: in with no matching element is not satisfied
+    success:
+      status: ["2xx"]
+      body:
+        - { path: status, op: in, value: [ok, accepted] }
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"status":"rejected"}'
+    want_outcome: permanent
+
+  - name: exists is satisfied by a null value
+    success:
+      status: ["2xx"]
+      body:
+        - { path: data, op: exists }
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"data":null}'
+    want_outcome: success
+
+  - name: not_exists on absent path is satisfied
+    success:
+      status: ["2xx"]
+      body:
+        - { path: error, op: not_exists }
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"code":0}'
+    want_outcome: success
+
+  - name: not_exists on null value is not satisfied
+    success:
+      status: ["2xx"]
+      body:
+        - { path: error, op: not_exists }
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"error":null}'
+    want_outcome: permanent
+
+  - name: all body rules must hold
+    success:
+      status: ["2xx"]
+      body:
+        - { path: code, op: eq, value: 0 }
+        - { path: data.id, op: exists }
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"code":0}'
+    want_outcome: permanent
+
+  # ----------------------------------------------------------- non-JSON ---
+  - name: non-json body with body rules is not success
+    success: *success_code0
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: text/plain
+      body: OK
+    want_outcome: permanent
+
+  - name: truncated json body with body rules is not success
+    success: *success_code0
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: application/json
+      body: '{"code":'
+    want_outcome: permanent
+
+  - name: empty 204 body with body rules is not success
+    success: *success_code0
+    retry_on: *retry_default
+    response:
+      status: 204
+      content_type: ""
+      body: ""
+    want_outcome: permanent
+
+  - name: non-json body without body rules is success
+    success: &success_2xx
+      status: ["2xx"]
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: text/plain
+      body: OK
+    want_outcome: success
+
+  # Spec §7.2 tests JSON validity of the body, not the Content-Type header.
+  - name: content type is not consulted for body rules
+    success: *success_code0
+    retry_on: *retry_default
+    response:
+      status: 200
+      content_type: text/plain
+      body: '{"code":0}'
+    want_outcome: success
+
+  # --------------------------------------------------------------- status --
+  - name: status class 2xx matches 204
+    success: *success_2xx
+    retry_on: *retry_default
+    response:
+      status: 204
+      content_type: ""
+      body: ""
+    want_outcome: success
+
+  - name: exact status list rejects unlisted 2xx
+    success:
+      status: [200, 201]
+    retry_on: *retry_default
+    response:
+      status: 202
+      content_type: application/json
+      body: "{}"
+    want_outcome: permanent
+
+  - name: status not matching success but listed in retry_on is retryable
+    success:
+      status: [200]
+    retry_on:
+      status: [202]
+    response:
+      status: 202
+      content_type: application/json
+      body: "{}"
+    want_outcome: retryable
+
+  - name: 503 in retry_on class is retryable
+    success: *success_2xx
+    retry_on: *retry_default
+    response:
+      status: 503
+      content_type: text/html
+      body: "<h1>unavailable</h1>"
+    want_outcome: retryable
+
+  - name: 500 not in retry_on is permanent
+    success: *success_2xx
+    retry_on:
+      status: [503]
+    response:
+      status: 500
+      content_type: text/plain
+      body: boom
+    want_outcome: permanent
+
+  - name: 404 is permanent
+    success: *success_2xx
+    retry_on: *retry_default
+    response:
+      status: 404
+      content_type: application/json
+      body: '{"error":"not found"}'
+    want_outcome: permanent
+
+  - name: 429 listed exactly in retry_on is retryable
+    success: *success_2xx
+    retry_on: *retry_default
+    response:
+      status: 429
+      content_type: application/json
+      body: '{"error":"slow down"}'
+    want_outcome: retryable
+
+  - name: 429 via 4xx class in retry_on is retryable
+    success: *success_2xx
+    retry_on:
+      status: ["4xx"]
+    response:
+      status: 429
+      content_type: application/json
+      body: '{"error":"slow down"}'
+    want_outcome: retryable
+
+  - name: 429 not listed in retry_on is permanent
+    success: *success_2xx
+    retry_on:
+      status: ["5xx"]
+    response:
+      status: 429
+      content_type: application/json
+      body: '{"error":"slow down"}'
+    want_outcome: permanent
+
+  # -------------------------------------------------------- network errors --
+  - name: timeout is retryable
+    success: *success_2xx
+    retry_on: *retry_default
+    network_error: timeout
+    want_outcome: retryable
+
+  - name: connection failure is retryable
+    success: *success_2xx
+    retry_on: *retry_default
+    network_error: connect
+    want_outcome: retryable
+
+  - name: dns failure is retryable even with empty retry_on
+    success: *success_2xx
+    retry_on:
+      status: []
+    network_error: dns
+    want_outcome: retryable
+
+  - name: tls failure is retryable
+    success: *success_2xx
+    retry_on: *retry_default
+    network_error: tls
+    want_outcome: retryable

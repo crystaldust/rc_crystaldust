@@ -1,0 +1,169 @@
+# Message Hub example configuration (docs/design/domain-model.md §11).
+#
+# Covers the three scenarios from original_requirement.md:
+#   1. user registered  -> ad platform   (hashed email, HMAC-signed request)
+#   2. payment succeeded -> CRM          (OAuth2 client credentials, PATCH)
+#   3. purchase made    -> inventory     (ordered per SKU) + data warehouse (fan-out)
+#
+# No credential appears in this file: every secret is an `env:NAME` reference
+# resolved at runtime. API keys are referenced by the SHA-256 hex of the key.
+version: 1
+
+# Who may call the Hub API. For role=source the id becomes the event's `source`.
+principals:
+  - id: user-service
+    role: source
+    api_key_sha256_ref: env:HUB_KEY_USER_SERVICE_SHA256
+  - id: billing-service
+    role: source
+    api_key_sha256_ref: env:HUB_KEY_BILLING_SERVICE_SHA256
+  - id: order-service
+    role: source
+    api_key_sha256_ref: env:HUB_KEY_ORDER_SERVICE_SHA256
+  - id: support-viewer        # read-only access to events and deliveries
+    role: viewer
+    api_key_sha256_ref: env:HUB_KEY_SUPPORT_VIEWER_SHA256
+  - id: oncall-operator       # may also replay / skip deliveries
+    role: operator
+    api_key_sha256_ref: env:HUB_KEY_ONCALL_OPERATOR_SHA256
+
+# Delivery policies: timeout, retry budget and backoff, success rule, ordering.
+policies:
+  # Generic webhook vendor: any 2xx is success.
+  - id: default
+    timeout: 5s
+    retry:
+      max_attempts: 8                     # includes the first attempt
+      backoff: { initial: 5s, multiplier: 2.0, max: 1h, jitter: 0.2 }
+      retry_on: { status: [408, 425, 429, "5xx"] }
+    success:
+      status: ["2xx"]
+    ordering: { mode: none }
+
+  # The ad platform answers HTTP 200 even for business errors, so success
+  # also requires {"code": 0} in the response body.
+  - id: ad-platform
+    timeout: 3s
+    retry:
+      max_attempts: 6
+      backoff: { initial: 10s, multiplier: 2.0, max: 30m, jitter: 0.2 }
+      retry_on: { status: [429, "5xx"] }
+    success:
+      status: ["2xx"]
+      body:
+        - { path: code, op: eq, value: 0 }
+    ordering: { mode: none }
+
+  # Inventory changes must be applied in order per SKU. Events carry
+  # ordering_key = the SKU; deliveries to the same destination with the same
+  # key go out strictly in ingest order. If one dies, later ones for that SKU
+  # wait (block) until an operator replays or skips it.
+  - id: inventory-ordered
+    timeout: 5s
+    retry:
+      max_attempts: 10
+      backoff: { initial: 2s, multiplier: 2.0, max: 15m, jitter: 0.1 }
+      retry_on: { status: [409, 429, "5xx"] }
+    success:
+      status: [200, 204]
+    ordering: { mode: per_key, on_predecessor_dead: block }
+
+# Vendor endpoints and their request templates (§7.1).
+destinations:
+  # Scenario 1: ad platform conversion callback.
+  - id: ad-platform
+    policy: ad-platform
+    max_in_flight: 20
+    secrets:
+      AD_SIGNING_KEY: env:AD_PLATFORM_SIGNING_KEY
+    auth: { type: none }                 # authenticated by the HMAC signature header
+    request:
+      method: POST
+      url: "https://ads.example.com/v2/conversions"
+      headers:
+        Content-Type: application/json
+        # Signature over the exact rendered body bytes.
+        X-Signature: "{{ request.body | hmac_sha256_hex secret.AD_SIGNING_KEY }}"
+      body:
+        event: registration
+        click_id: "{{ event.payload.click_id }}"
+        # The vendor matches users by normalised, hashed email only.
+        hashed_email: "{{ event.payload.email | lower | trim | sha256 }}"
+        registered_at: "{{ event.occurred_at | format_time unix }}"
+        dedup_id: "{{ event.id }}"
+
+  # Scenario 2: CRM contact status update.
+  - id: crm
+    policy: default
+    auth:
+      type: oauth2_client_credentials    # token fetched and cached by the Hub
+      token_url: "https://auth.crm.example.com/oauth/token"
+      client_id_ref: env:CRM_CLIENT_ID
+      client_secret_ref: env:CRM_CLIENT_SECRET
+      scopes: [contacts.write]
+    request:
+      method: PATCH
+      url: "https://api.crm.example.com/v1/contacts/{{ event.payload.contact_id }}"
+      headers:
+        Content-Type: application/json
+        Idempotency-Key: "{{ event.id }}"
+      body:
+        status: paying_customer
+        plan: "{{ event.payload.plan }}"
+        paid_at: "{{ event.occurred_at }}"
+
+  # Scenario 3a: inventory adjustment, ordered per SKU.
+  - id: inventory
+    policy: inventory-ordered
+    max_in_flight: 5
+    secrets:
+      INVENTORY_TOKEN: env:INVENTORY_API_TOKEN
+    request:
+      method: POST
+      url: "https://inventory.example.com/api/skus/{{ event.payload.sku }}/adjustments"
+      headers:
+        Content-Type: application/json
+        Authorization: "Bearer {{ secret.INVENTORY_TOKEN }}"
+      body:
+        order_id: "{{ event.payload.order_id }}"
+        delta: "{{ event.payload.quantity }}"   # single expression keeps the number type
+        reason: purchase
+
+  # Scenario 3b: the same purchase also goes to the data warehouse (fan-out).
+  - id: data-warehouse
+    policy: default
+    max_in_flight: 50
+    secrets:
+      DWH_SIGNING_KEY: env:DWH_WEBHOOK_SIGNING_KEY
+    request:
+      method: PUT
+      url: "https://dwh.example.com/ingest/purchases/{{ event.id }}"
+      headers:
+        Content-Type: application/json
+        X-Hub-Signature: "{{ request.body | hmac_sha256_base64 secret.DWH_SIGNING_KEY }}"
+      body:
+        event_id: "{{ event.id }}"
+        source: "{{ event.source }}"
+        occurred_at: "{{ event.occurred_at }}"
+        purchase: "{{ event.payload }}"       # whole payload object passed through
+
+# event_type (+ optional sources / match) -> destinations (§4).
+routes:
+  - id: registration-to-ads
+    event_type: user.registered
+    sources: [user-service]
+    # Only users who arrived through an ad click are reported.
+    match:
+      - { path: payload.click_id, op: exists }
+    destinations: [ad-platform]
+
+  - id: payment-to-crm
+    event_type: payment.succeeded
+    sources: [billing-service]
+    destinations: [crm]
+
+  # One route, two destinations: each gets its own independent delivery.
+  - id: purchase-fanout
+    event_type: order.purchased
+    sources: [order-service]
+    destinations: [inventory, data-warehouse]

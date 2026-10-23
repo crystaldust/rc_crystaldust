@@ -1,0 +1,33 @@
+{
+  "source_event_id": "ord-1001",
+  "event_type": "crm.contact.status_changed",
+  "occurred_at": "2026-10-24T08:30:00Z",
+  "payload": {
+    "contact": {
+      "id": "c-42",
+      "tags": [
+        "vip",
+        "ads"
+      ],
+      "address": {
+        "city": "Hangzhou",
+        "geo": {
+          "lat": 30.27,
+          "lng": 120.15
+        }
+      }
+    },
+    "items": [
+      {
+        "sku": "A1",
+        "qty": 2
+      },
+      {
+        "sku": "B2",
+        "qty": 1
+      }
+    ],
+    "paid": true,
+    "coupon": null
+  }
+}
