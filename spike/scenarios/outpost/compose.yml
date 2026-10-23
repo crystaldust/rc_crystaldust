@@ -1,0 +1,57 @@
+# Outpost v1.7.0 PoC stack: Redis + PostgreSQL + RabbitMQ, all three services split.
+# Credentials below are throwaway dummy values for a local-only spike, not real secrets.
+name: spike-outpost
+
+x-outpost-env: &outpost-env
+  API_KEY: spike-api-key
+  API_JWT_SECRET: spike-jwt-secret
+  AES_ENCRYPTION_SECRET: spike-aes-secret-32-bytes-long!!
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: spike
+  REDIS_DATABASE: "0"
+  POSTGRES_URL: postgres://outpost:outpost@postgres:5432/outpost?sslmode=disable
+  RABBITMQ_SERVER_URL: amqp://guest:guest@rabbitmq:5672
+  TOPICS: order.paid
+  RETRY_SCHEDULE: "1,2,4"
+  LOG_BATCH_THRESHOLD_SECONDS: "1"
+  DELIVERY_TIMEOUT_SECONDS: "5"
+  DELIVERY_MAX_CONCURRENCY: "10"
+  LOG_LEVEL: info
+
+x-outpost: &outpost
+  image: hookdeck/outpost:v1.7.0
+  extra_hosts: ["host.docker.internal:host-gateway"]
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --requirepass spike
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: outpost, POSTGRES_PASSWORD: outpost, POSTGRES_DB: outpost }
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "outpost"], interval: 1s, retries: 30 }
+  rabbitmq:
+    image: rabbitmq:3-management
+    healthcheck: { test: rabbitmq-diagnostics check_port_connectivity, interval: 2s, retries: 30 }
+  migrate:
+    image: hookdeck/outpost:v1.7.0
+    command: migrate apply --yes
+    environment: *outpost-env
+    depends_on:
+      redis: { condition: service_started }
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    restart: "no"
+  api:
+    <<: *outpost
+    environment: { <<: *outpost-env, SERVICE: api }
+    ports: ["127.0.0.1:3333:3333"]
+  delivery:
+    <<: *outpost
+    environment: { <<: *outpost-env, SERVICE: delivery }
+  log:
+    <<: *outpost
+    environment: { <<: *outpost-env, SERVICE: log }
