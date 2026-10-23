@@ -196,7 +196,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 | # | Phase | Description | Status | Parallel | Depends | PRP Plan |
 |---|-------|-------------|--------|----------|---------|----------|
 | 1 | 技术验证与选型 | Outpost / Svix 对照评估，确定自建 vs 二次开发；确定语言、MQ、状态存储 | complete | - | - | [plan](../plans/completed/tech-spike-and-selection.plan.md) · [report](../reports/tech-spike-and-selection-report.md) |
-| 2 | 领域模型与契约 | 统一事件格式、配置模型（Destination / Route / Policy）、状态机、API 契约 | pending | - | 1 | - |
+| 2 | 领域模型与契约 | 统一事件格式、配置模型（Destination / Route / Policy）、状态机、API 契约、数据库 schema | in-progress | - | 1 | [domain-model-and-contracts.plan.md](../plans/domain-model-and-contracts.plan.md) |
 | 3 | 受理与查询 | Ingest API、持久化、去重、状态查询 API、权限 | pending | with 4 | 2 | - |
 | 4 | 投递引擎 | 路由扇出、模板构造、认证、发送、成功判定、重试、死信 | pending | with 3 | 2 | - |
 | 5 | 运维能力 | 人工重放、指标 / 追踪 / 日志、告警、对账任务 | pending | with 6 | 3, 4 | - |
