@@ -1,0 +1,27 @@
+{
+  "patch_response": [
+    200,
+    {
+      "id": "aef33645-26b7-4512-803b-44d9d668b2fb",
+      "tenant_id": "hub",
+      "type": "webhook",
+      "topics": [
+        "order.paid"
+      ],
+      "config": {
+        "custom_headers": "{\"X-Api-Key\": \"spike-key\"}",
+        "url": "http://host.docker.internal:18080/vendor-b/hook"
+      },
+      "credentials": {
+        "secret": "whsec_<redacted>"
+      },
+      "created_at": "2026-10-23T17:08:44.293Z",
+      "updated_at": "2026-10-23T17:10:49.752889156Z",
+      "disabled_at": null,
+      "target": "http://host.docker.internal:18080/vendor-b/hook"
+    }
+  ],
+  "vendor_b_has_x_api_key": true,
+  "vendor_a_body": "{\"uid\":2,\"amount\":10}",
+  "note": "no configuration exists to reshape the body to {uid, evt}; body is sent exactly as published"
+}

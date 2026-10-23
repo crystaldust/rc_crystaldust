@@ -1,0 +1,30 @@
+{
+  "requests": 4,
+  "intervals_s": [
+    1.02,
+    2.14,
+    3.97
+  ],
+  "attempts": [
+    {
+      "status": "success",
+      "code": "200",
+      "time": "2026-10-23T17:11:09.292613Z"
+    },
+    {
+      "status": "failed",
+      "code": "500",
+      "time": "2026-10-23T17:11:05.267951Z"
+    },
+    {
+      "status": "failed",
+      "code": "500",
+      "time": "2026-10-23T17:11:03.244125Z"
+    },
+    {
+      "status": "failed",
+      "code": "500",
+      "time": "2026-10-23T17:11:02.220924Z"
+    }
+  ]
+}

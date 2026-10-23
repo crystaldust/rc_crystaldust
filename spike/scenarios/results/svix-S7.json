@@ -1,0 +1,19 @@
+{
+  "publish_order": [
+    "created",
+    "paid",
+    "cancelled"
+  ],
+  "arrival_order_incl_failed_first": [
+    "created",
+    "paid",
+    "cancelled",
+    "created"
+  ],
+  "success_order": [
+    "paid",
+    "cancelled",
+    "created"
+  ],
+  "ordered": false
+}

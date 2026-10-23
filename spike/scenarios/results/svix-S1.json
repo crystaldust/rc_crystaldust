@@ -1,0 +1,39 @@
+{
+  "event_id": "s1-1792775792504",
+  "publish_first": [
+    202,
+    {
+      "eventId": "s1-1792775792504",
+      "eventType": "order.paid",
+      "payload": {
+        "amount": 99,
+        "uid": 1
+      },
+      "channels": null,
+      "id": "msg_3L6Y4Qbd6FzcbCcoBBAWmOAaMH9",
+      "timestamp": "2026-10-23T17:16:32.619719Z"
+    }
+  ],
+  "publish_duplicate": [
+    409,
+    {
+      "code": "conflict",
+      "detail": "A conflict has occurred"
+    }
+  ],
+  "received_count": {
+    "vendor-a": 1,
+    "vendor-b": 1
+  },
+  "headers_vendor_a": {
+    "Host": "host.docker.internal:18080",
+    "Accept": "*/*",
+    "content-type": "application/json",
+    "user-agent": "Svix-Webhooks/1.102.1",
+    "svix-id": "msg_3L6Y4Qbd6FzcbCcoBBAWmOAaMH9",
+    "svix-signature": "v1,hqFdUNMXcKmDDB5kqeje4Ax/03WawNs3vE/tdVVeDJ0=",
+    "svix-timestamp": "1792775792",
+    "Content-Length": "24"
+  },
+  "body_vendor_a": "{\"uid\": 1, \"amount\": 99}"
+}

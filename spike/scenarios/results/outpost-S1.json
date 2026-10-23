@@ -1,0 +1,41 @@
+{
+  "event_id": "s1-1792775447143",
+  "publish_first": [
+    202,
+    {
+      "id": "s1-1792775447143",
+      "duplicate": false,
+      "destination_ids": [
+        "aef33645-26b7-4512-803b-44d9d668b2fb",
+        "633dd8f2-04d2-423a-93cd-ffbe738c576c"
+      ]
+    }
+  ],
+  "publish_duplicate": [
+    202,
+    {
+      "id": "s1-1792775447143",
+      "duplicate": true,
+      "destination_ids": [
+        "aef33645-26b7-4512-803b-44d9d668b2fb",
+        "633dd8f2-04d2-423a-93cd-ffbe738c576c"
+      ]
+    }
+  ],
+  "received_count": {
+    "vendor-a": 1,
+    "vendor-b": 1
+  },
+  "headers_vendor_a": {
+    "Host": "host.docker.internal:18080",
+    "User-Agent": "Outpost/1.7.0",
+    "Content-Length": "21",
+    "Content-Type": "application/json",
+    "X-Outpost-Event-Id": "s1-1792775447143",
+    "X-Outpost-Signature": "v0=e9eed2b16e4752d6658a5d52a5bbf34ec564b9e9f4d602f4416d8d4058e43071",
+    "X-Outpost-Timestamp": "2026-10-23T17:10:47Z",
+    "X-Outpost-Topic": "order.paid",
+    "Accept-Encoding": "gzip"
+  },
+  "body_vendor_a": "{\"uid\":1,\"amount\":99}"
+}

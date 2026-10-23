@@ -28,7 +28,7 @@
 | 2 | 评估清单与决策规则 | Complete | 单独提交（`f4bc44f`），早于两份评估文档 |
 | 3 | Outpost 源码级评估 | Complete | 子 agent 完成；82/144，不满足条件 1 和条件 3 |
 | 4 | Svix 源码级评估 | Complete | 子 agent 完成；88/144，不满足条件 1 和条件 3 |
-| 5 | 模拟供应商与 PoC 场景 | Partial | mock 与自检完成（9/9）；**S1–S8 未实测**（见 Issues），已写好执行步骤与 Outpost compose 文件 |
+| 5 | 模拟供应商与 PoC 场景 | Complete | mock 自检 9/9；两个候选的 S1–S8 均已补跑，与源码一致；新发现 Svix 修改 Header 后需约 30s 才生效 |
 | 6 | 自建技术栈评估 | Complete | Go 76/85；仅 PG 64/75；PostgreSQL 58/60 |
 | 7 | ADR 与 PRD 更新 | Complete | ADR 为 Proposed；PRD Phase 1 保持 in-progress，待评审 |
 
@@ -39,7 +39,7 @@
 | Static Analysis | Pass | `py_compile`、`bash -n` |
 | Unit Tests | Pass | `self_check.sh` 9 项全部 PASS（plan 中列了 6 项，另补 3 项边界用例） |
 | Build | N/A | 本阶段不产出可构建的服务代码 |
-| Integration（PoC） | Skipped | Docker daemon 无法访问 Docker Hub；用户确认以源码证据为准 |
+| Integration（PoC） | Pass（补跑） | 起初因 Docker 网络问题跳过；配置代理后两个候选的 S1–S8 全部执行，结果与源码评估一致，分数无调整（`docs/spike/04-poc-results.md`） |
 | Edge Cases | Pass | 空 Body、1MB Body、非法控制参数、并发隔离均已覆盖；"连接拒绝"属于 PoC 范围，未执行 |
 | 文档完整性 | Pass | 无 MISSING；每个 ADR 都有 Decision 段；无 TBD |
 | 证据抽查 | Pass | 4 条源码引用经主线程独立核对（见 `docs/spike/04-poc-results.md`） |
@@ -64,8 +64,9 @@
 
 ## Deviations from Plan
 
-1. **PoC 未实测**：Docker daemon 无法访问 Docker Hub，本地也没有依赖服务。用户选择跳过实测，以源码证据为准。`04-poc-results.md` 中做了影响分析：即使可能被推翻的项全部取满分，两个候选也仍低于门槛
-2. **Svix PoC 不单独编写 compose 文件**：步骤中直接使用上游仓库自带的 `server/docker-compose.yml`（只运行，不修改）
+1. **PoC 先跳过、后补跑**：Docker daemon 起初无法访问 Docker Hub；配置代理后补跑了全部场景。为便于复跑，场景逻辑改为 `spike/scenarios/scenarios.py` 脚本（plan 中只要求 Markdown 步骤）
+2. **Svix 单独编写了 compose 文件**（`spike/scenarios/svix/compose.yml`）：上游 compose 从源码构建，且默认重试 schedule 长达数小时，因此改用官方镜像并缩短 schedule
+3. **S6 增加 Svix 变体**（`worker_max_tasks=10`）：默认 500 个槽位在 20 个事件下不会被占满，变体用来证实共享槽位机制
 3. **`UNVERIFIED` 的计分方式**：checklist 中明确写为"按 0 分计"。plan 只说"不得计入评分"，两者含义一致，checklist 的写法更明确
 4. **PRD Phase 1 未标记为 `complete`**：plan 的 GOTCHA 要求 ADR 评审通过后才能标记完成，与 prp-implement 的默认步骤冲突，以 plan 为准
 5. **`.gitignore`** 额外加入 `.DS_Store` 和 `__pycache__/`

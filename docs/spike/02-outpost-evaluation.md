@@ -2,7 +2,7 @@
 
 > 评估对象：Hookdeck Outpost `v1.7.0`（`.spike/src/outpost`，只读，未构建、未执行仓库内任何代码）
 > 评分依据：`docs/spike/01-evaluation-checklist.md`（C1–C18、权重、评分标准、决策规则均按锁定版本执行，未做调整）
-> 证据格式：`outpost@v1.7.0:<path>:L<a>-L<b>`，行号均已逐条核对；PoC（S1–S8）尚未执行，本文仅为源码证据，PoC 结论与本文冲突时以实测为准
+> 证据格式：`outpost@v1.7.0:<path>:L<a>-L<b>`，行号均已逐条核对。PoC（S1–S8）已于 2026-10-24 补跑，全部与本文结论一致，分数无调整（见 `04-poc-results.md`）
 
 ## 1. 结论摘要
 
@@ -82,7 +82,7 @@
 | C18 | 首次投递 P99 < 1s | 3 | 3 | 9 | 首次投递路径：API 同步写入 deliverymq → 消费者推送 → HTTP，中间没有批处理和轮询：`outpost@v1.7.0:internal/publishmq/eventhandler.go:L159-L202`、`outpost@v1.7.0:internal/deliverymq/messagehandler.go:L124-L158`、`L199-L205`；10s 批处理只作用于 logmq 和重试，不影响首次投递 | 源码层面没有发现会增加延迟的结构；需要 S8 实测确认。注意：默认 `DELIVERY_MAX_CONCURRENCY=1`（`config.go:L196`），压测前要调大；只有并发重复请求才会触发 idempotence 的 5s 等待（`idempotence.go:L121-L122`） |
 | **合计** | | | **48** | **82** | | 满分 144；82 / 144 = 56.9% |
 
-**UNVERIFIED 项**：无。所有分值都有源码或仓库内文档证据。C9、C13、C18 的结论仍需 S6/S7/S8 实测复核。
+**UNVERIFIED 项**：无。所有分值都有源码或仓库内文档证据。C9、C13、C18 已经过 S6、S7、S8 实测复核：S6 中 vendor-b 的 P50 被拖到 4.9s，S7 无序，S8 的 P99 为 57ms。
 
 ## 4. 1 分项及涉及的核心模块（决策规则条件 3）
 

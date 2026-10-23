@@ -2,7 +2,7 @@
 
 > 评估对象：`svix/svix-webhooks` tag `server-v1.102.1`（commit `6e014fd`，2026-10-20），本地只读克隆 `.spike/src/svix`。
 > 评分规则、权重、证据格式与决策规则均按 `01-evaluation-checklist.md` 执行，未作任何调整。
-> 本文所有分值仅基于源码与仓库内文档；PoC（S1–S8）尚未执行。若后续实测与本文冲突，以实测为准。
+> 本文所有分值基于源码与仓库内文档。PoC（S1–S8）已于 2026-10-24 补跑，全部与本文结论一致，分数无调整；另发现一个新缺陷：修改 Header 不会让配置缓存失效（见 `04-poc-results.md` §S2）。
 > 证据前缀统一为 `svix@server-v1.102.1:`。队列底层库 omniqueue 不在仓库内，按 `server/svix-server/Cargo.toml:L62` 钉死的 rev 通过 GitHub API 只读获取，前缀为 `omniqueue@acb4098:`。
 
 ## 1. 结论摘要
@@ -82,7 +82,11 @@
 | C18 | 首投 P99 < 1s | 3 | 3 | 9 | 受理后立即 XADD（无延迟）：`server/svix-server/src/v1/endpoints/message.rs:L443-L459`；XREADGROUP BLOCK 有消息即返回：`omniqueue@acb4098:omniqueue/src/backends/redis/streams.rs:L89-L124`；worker 立即 spawn：`server/svix-server/src/worker.rs:L1057-L1100`；分发前读 2 次 PG 加 1 次 cache：`server/svix-server/src/worker.rs:L817-L933`；重试走 500ms 轮询（不影响首投）：`omniqueue@acb4098:omniqueue/src/backends/redis/mod.rs:L634-L712` | 源码路径上没有轮询延迟。风险：worker 槽位饱和时每 100ms 自旋等待（`server/svix-server/src/worker.rs:L1029-L1035`）。待 S8 实测 |
 | **合计** | | | **48** | **88** | | 88 / 144 = 61.1% |
 
-`UNVERIFIED` 项：无。所有分值都有源码或仓库内文档支撑，但都**未经 PoC 验证**，C18、C9 尤其需要 S8、S6 确认。
+`UNVERIFIED` 项：无。所有分值都有源码或仓库内文档支撑，并已经过 PoC 复核：
+- S8 的 P99 为 8.5ms
+- S6 在默认 500 槽位下没有表现出问题；把槽位降到 10 后，vendor-b 最大延迟 10.0s，证实共享槽位加 `join_all` 的机制
+
+PoC 另发现：`headers.rs` 没有调用 `CreateMessageApp::invalidate`，Header 修改要等缓存 TTL（约 30s）过期后才生效。这是 C3/C4 的补充负面证据，分数不变。
 
 ### 额外发现（不计分，但影响"零静默丢失"目标）
 

@@ -1,0 +1,7 @@
+{
+  "note": "vendor-a delays 10s (longer than the delivery timeout); vendor-b responds immediately",
+  "events": 20,
+  "vendor_b_received": 20,
+  "vendor_b_latency_p50_s": 4.914,
+  "vendor_b_latency_max_s": 9.838
+}

@@ -1,0 +1,9 @@
+{
+  "patch_response": [
+    204,
+    null
+  ],
+  "vendor_b_has_x_api_key": false,
+  "vendor_a_body": "{\"uid\": 2, \"amount\": 10}",
+  "note": "no configuration exists to reshape the body to {uid, evt}; body is sent exactly as published"
+}
