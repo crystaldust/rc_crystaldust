@@ -276,6 +276,12 @@ Route 匹配条件（全部满足才算匹配）：
 - 角色不允许的操作返回 403
 - API Key 只以 SHA-256 形式出现在配置引用中，Hub 不保存明文
 
+**API Key 要求**（ADR-0008）：
+- 格式：`mhk_` 前缀 + 32 字节密码学随机数的 base64url 编码（无填充），共 47 个字符。前缀便于密钥扫描工具识别
+- 只能由 Hub 提供的工具生成（Phase 3），工具同时输出 key（交给调用方，只显示一次）和它的 SHA-256 小写 hex（放入环境变量）
+- 环境变量中可以放**最多两个**以逗号分隔的哈希（当前 key 与新 key），用于无中断轮换；轮换完成后删除旧哈希
+- Hub 在启动时校验环境变量内容为 1–2 个 64 位小写 hex，格式不符则拒绝启动
+
 ---
 
 ## 10. Attempt 记录内容
@@ -293,10 +299,24 @@ Route 匹配条件（全部满足才算匹配）：
 | `config_hash` | 渲染时生效配置的 `ConfigHash` |
 | `next_attempt_at` | 若进入 RETRY_SCHEDULED，下一次的计划时间 |
 
-**脱敏与截断**：
-- Header 中，**值引用了 `secret.*` 的 Header**，以及名为 `Authorization`、`Proxy-Authorization` 的 Header，值一律记为 `***`
-- 请求体与响应体各截断到 16 KiB（16384 字节），截断时记 `truncated: true`
-- 字段级脱敏（如 Body 中的邮箱）属于 Phase 6
+**脱敏**（ADR-0008）：
+
+"携带密钥的表达式"指**路径根为 `secret.` 的表达式**，例如 `{{ secret.TOKEN }}`。`{{ request.body | hmac_sha256_hex secret.KEY }}` 的路径根是 `request.body`，`secret.KEY` 只是签名函数的参数，输出的是签名而不是密钥本身，因此**不算**携带密钥的表达式。
+
+"敏感名称"由 `domain.IsSensitiveName` 判定（与配置校验共用同一规则）：`Authorization`、`Proxy-Authorization`、`Cookie`、`Set-Cookie`、`key`，以及包含 `token`、`secret`、`password`、`passwd`、`signature`、`credential`、`api-key`/`apikey`、`access-key`、`private-key`，或以 `-key` 结尾的名称（不区分大小写，`_` 视同 `-`）。含 `idempotency` 的名称除外。
+
+| 位置 | 记为 `***` 的部分 |
+|---|---|
+| Header | 名称为敏感名称的 Header，整个值；值中含有携带密钥的表达式的 Header，整个值 |
+| URL | 携带密钥的表达式的输出；名称为敏感名称的查询参数的值 |
+| 请求体 | 所在 key 为敏感名称的叶子值；含有携带密钥的表达式的叶子值（整个叶子） |
+| OAuth2 | 自动附加的 `Authorization: Bearer <token>` 按 Header 规则脱敏；获取 token 的请求与响应**不写入** attempt 记录 |
+
+- 脱敏在**截断之前**完成，保证截断不会留下部分密钥
+- 响应体不做密钥脱敏（Hub 无法知道供应商会回显什么），只截断；这是已知的残余风险，记录在 ADR-0008
+- 字段级的业务数据脱敏（如 Body 中的邮箱）属于 Phase 6
+
+**截断**：请求体与响应体各截断到 16 KiB（16384 字节），截断时记 `truncated: true`。
 
 ---
 
@@ -365,6 +385,25 @@ routes:
 | `max_in_flight` | `1–1000` |
 | `retry_on.status` / `success.status` 元素 | 100–599 的整数，或 `^[1-5]xx$` 字符串 |
 
+**凭据字段**（ADR-0008，加载时执行）：
+- 模板中引用的每个 `secret.NAME`，都必须在该 Destination 的 `secrets` 中声明；每个 Destination 只能访问自己声明的 secret
+- **名称为敏感名称**（规则见 §10）的 Header、URL 查询参数、Body 字段，其值必须含有引用 `secret.*` 的表达式（直接取值或作为 `hmac_*` 的参数均可），**不允许写字面量**
+- 确实需要字面量的字段（例如 `X-Signature-Version: v1`、`token_type=bearer`），必须显式列入该 Destination 的 `allow_literal`，格式为 `headers.<Header 名>`（不区分大小写）、`url.query.<参数名>`、`body.<点分路径>`（数组用数字下标，如 `body.auth.0.token_type`）
+- `allow_literal` 中没有对应任何"敏感名称且为字面量"字段的条目视为过期，加载失败，保证允许列表不会悄悄变宽
+- 配置校验是第一道防线；仓库的密钥扫描（gitleaks 等）是第二道防线（ADR-0008）
+
+```yaml
+destinations:
+  - id: vendor-x
+    secrets: { API_KEY: env:VENDOR_X_API_KEY }
+    allow_literal: [headers.X-Signature-Version]
+    request:
+      url: "https://x.example.com/hook?api_key={{ secret.API_KEY }}"   # 合法：引用 secret
+      headers:
+        X-Signature-Version: v1                                         # 合法：已列入 allow_literal
+        # X-Api-Key: sk_live_abc                                        # 非法：敏感名称写字面量
+```
+
 **语义校验**（加载时执行，错误一次性全部返回）：
 - route 引用的 destination、sources 引用的 principal（且角色必须为 `source`）都存在
 - destination 引用的 policy 存在
@@ -432,7 +471,7 @@ routes:
 | `format_time rfc3339` | 转为 UTC，秒级精度（舍弃小数部分），与时间的默认字符串化相同 |
 | 紧凑 JSON 的键顺序 | object 序列化时**按键排序**（与 Go `encoding/json` 对 map 的处理一致） |
 | `request.body` 用在非 Header 位置 | `syntax` 错误（可在加载配置时静态检测） |
-| `hmac_*` 引用未在 `secrets` 中声明的名字 | `bad_argument`（可在加载配置时静态检测） |
+| 任何模板（含 `hmac_*` 的参数）引用未在 `secrets` 中声明的名字 | **加载配置时即失败**（`references undeclared secret`，见 §11 凭据字段）；引擎在渲染时若仍遇到此情况，按 `bad_argument` 处理 |
 | 可选事件字段缺省（如 `event.idempotency_key` 未提供） | `missing_path`，需要用 `default` 兜底 |
 
 ### 13.3 成功判定与重试
@@ -461,6 +500,8 @@ routes:
 |---|---|
 | Principal 的认证 | 配置中只有 `env:` 引用；运行时读取环境变量得到 key 的 SHA-256，再构建"哈希 → Principal"查找表（Phase 3） |
 | 重复的 `api_key_sha256_ref` | 加载失败，因为认证会产生歧义 |
+| 密钥值的来源 | 只来自进程环境变量，由部署平台从 secret manager 注入；仓库中禁止出现 `.env` 文件（ADR-0008） |
+| 密钥轮换与 ConfigHash | ConfigHash 只基于引用名计算，轮换密钥值不改变哈希；需要追溯时以部署记录为准 |
 | ConfigHash 的计算范围 | 对**填充默认值之后**的配置计算；修改注释、显式写出默认值不改变哈希；duration 按原文参与计算（`5s` 与 `5000ms` 哈希不同） |
 | 重复路由的 warning | 同一 `event_type` 的两个 route 指向同一 destination 即给出 warning，不分析 `sources` / `match` 条件是否重叠 |
 

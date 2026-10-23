@@ -28,6 +28,7 @@ func validateSemantics(doc document) []domain.FieldError {
 		if _, ok := policyIdx[d.Policy]; !ok {
 			p.add(fmt.Sprintf("destinations[%d].policy", i), "unknown policy %q", d.Policy)
 		}
+		checkSecretUsage(&p, i, d)
 	}
 	for i, r := range doc.Routes {
 		checkRoute(&p, i, r, doc.Principals, principalIdx, destIdx)

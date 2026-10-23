@@ -55,6 +55,7 @@ We'll know we're right when 首批接入业务上线后：失败消息零静默�
 - [x] 技术栈（语言、MQ、状态存储）的最终选型（Phase 1 输出）→ Go + PostgreSQL，ADR-0002 至 0004（Accepted）
 - [x] 有序投递的阻塞策略：同一顺序键的前序事件进入死信时，后续事件是阻塞、跳过还是一并进入死信 → 按策略可配，默认阻塞，ADR-0007
 - [ ] `unrouted` 事件在补充路由配置后，是否需要提供"重新路由"能力（运维对已受理事件按当前配置重新匹配并生成 Delivery）
+- [ ] secret manager 选型与密钥注入方式（Vault / Kubernetes Secret / 云 KMS，或混合使用），见 ADR-0008 D3
 
 ---
 
@@ -272,6 +273,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 | 模板能力 | 字段路径 + 12 个固定内置函数，无条件与循环（[ADR-0006](../../../docs/adr/0006-template-language-scope.md)） | 只做字段映射；Go text/template | 覆盖哈希、签名等需求，同时保持可预测、易评审 |
 | 有序投递 | 按 `(destination, ordering_key)` 保证受理顺序；前序 DEAD 时按策略 block / skip，默认 block（[ADR-0007](../../../docs/adr/0007-ordering-semantics.md)） | 一律阻塞；一律跳过 | 库存类业务需要阻塞，其他业务可选跳过 |
 | 无匹配路由的记录方式 | 显式 `routing_status`（routed / unrouted）+ `routing_config_hash`，数据库约束保证一致 | 只看 `matched_route_ids` 是否为空 | 用户要求（2026-10-24）；便于筛选、统计与告警 |
+| 密钥管理 | 配置只写 `env:` 引用；敏感名称字段禁止字面量（`allow_literal` 显式例外）；attempt 记录在截断前脱敏；密钥只从环境变量注入；入站 API Key 为 256 位随机值并支持双哈希轮换（[ADR-0008](../../../docs/adr/0008-secrets-management.md)） | 依赖评审发现明文；只对 Header 脱敏 | 用户要求（2026-10-24）；把"禁止明文"做成加载失败，配置校验与记录脱敏共用一条规则 |
 | 部署 | 混合环境 | 单一云 / 单一 IDC | 业务要求 |
 | 范围边界 | 只聚焦 Hub 模块本身 | 同时设计上下游交互 | 系统间交互在更高维度讨论 |
 | 交付方式 | AI Vibe Coding，尽快上线 | 传统排期 | 业务决策；以规格与测试作质量护栏 |

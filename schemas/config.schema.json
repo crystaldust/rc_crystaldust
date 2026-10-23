@@ -135,7 +135,15 @@
           "additionalProperties": { "$ref": "#/$defs/envRef" }
         },
         "auth": { "$ref": "#/$defs/auth" },
-        "request": { "$ref": "#/$defs/request" }
+        "request": { "$ref": "#/$defs/request" },
+        "allow_literal": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(headers\\.[!#$%&'*+.^_`|~0-9A-Za-z-]+|url\\.query\\.[^\\s&=]+|body\\.[^\\s]+)$"
+          }
+        }
       }
     },
     "auth": {

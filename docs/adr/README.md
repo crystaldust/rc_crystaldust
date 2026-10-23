@@ -9,5 +9,6 @@
 | [ADR-0005](0005-config-as-yaml-in-git.md) | 配置以 YAML 文件形式存放在 Git 中管理 | Accepted | 2026-10-24 |
 | [ADR-0006](0006-template-language-scope.md) | 请求模板只支持字段路径取值与固定的内置函数 | Accepted | 2026-10-24 |
 | [ADR-0007](0007-ordering-semantics.md) | 有序投递按目标和 ordering_key 保证受理顺序，前序死信默认阻塞 | Accepted | 2026-10-24 |
+| [ADR-0008](0008-secrets-management.md) | 密钥管理：配置只写引用、运行时注入、记录脱敏、API Key 强度约束 | Accepted | 2026-10-24 |
 
 格式约定见 `.claude/PRPs/plans/completed/tech-spike-and-selection.plan.md` 的 ADR_FORMAT。评审通过后，把状态改为 `Accepted`。

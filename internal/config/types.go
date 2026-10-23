@@ -121,6 +121,9 @@ type Destination struct {
 	Secrets     map[string]string `json:"secrets,omitempty"`
 	Auth        Auth              `json:"auth"`
 	Request     Request           `json:"request"`
+	// AllowLiteral lists credential-looking fields that legitimately hold a
+	// literal value (§11 "凭据字段"), e.g. "headers.X-Signature-Version".
+	AllowLiteral []string `json:"allow_literal,omitempty"`
 }
 
 // Auth is the outbound authentication. OAuth2 fields are set only for

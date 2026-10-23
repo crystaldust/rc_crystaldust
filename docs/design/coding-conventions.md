@@ -58,6 +58,14 @@ db/                 内嵌 SQL 迁移
 - **宽事件日志**：每次受理输出一条 `event.received`（无匹配路由时为 `event.unrouted`，级别 warn），每次 attempt 输出一条 `delivery.attempted`，字段齐全（event_id、delivery_id、destination_id、outcome、status_code、duration_ms、attempt、config_hash）
 - **禁止进入日志**：API Key、secret 值、`Authorization` 头、payload 原文、响应体原文
 
+## 7a. 密钥（ADR-0008）
+
+- 配置、代码、测试数据、文档中**不得出现真实密钥**；测试中使用明显的假值（如 `abc123`、`spike-key`）
+- 配置中的凭据只写 `env:NAME` 引用；模板中的凭据只能来自 `{{ secret.NAME }}`
+- 判断"某个名称是否携带凭据"时，一律调用 `domain.IsSensitiveName`，不得另写一套规则
+- 不提交 `.env` 文件；本地密钥只放在自己的 shell 环境中
+- 提交前运行 `make check-secrets`
+
 ## 8. 测试
 
 - 结构：Arrange-Act-Assert，表驱动，`t.Run` 子测试，用例名描述被测行为
@@ -79,8 +87,9 @@ db/                 内嵌 SQL 迁移
 提交前必须通过：
 
 ```bash
-make lint   # gofmt（只检查 git 跟踪的文件）+ go vet
-make test   # go test -race ./...
+make lint            # gofmt（只检查 git 跟踪的文件）+ go vet
+make test            # go test -race ./...
+make check-secrets   # 禁止跟踪 .env 文件；安装了 gitleaks 时同时扫描仓库
 ```
 
 涉及数据库 schema 时还需：

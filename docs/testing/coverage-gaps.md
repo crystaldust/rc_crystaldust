@@ -16,10 +16,10 @@ make cover-gaps        # 等价于 bash scripts/cover-gaps.sh
 | 项 | 值 |
 |---|---|
 | 日期 | 2026-10-24 |
-| 阶段 | Phase 2 完成后 |
-| 语句覆盖率（`./...`，不含集成测试） | **97.2%** |
-| 未覆盖代码块 | 22 个，全部属于第 3 节"接受不覆盖" |
-| 各包覆盖率 | `internal/domain` 99.1%、`internal/config` 96.6%、`internal/contracts` 96.4% |
+| 阶段 | Phase 2 完成后（含 ADR-0008 凭据校验） |
+| 语句覆盖率（`./...`，不含集成测试） | **97.4%** |
+| 未覆盖代码块 | 22 个，全部属于第 3 节"接受不覆盖"；ADR-0008 新增的 `domain.IsSensitiveName` 与 `internal/config/secrets.go` 为 100% 覆盖 |
+| 各包覆盖率 | `internal/domain` 99.2%、`internal/config` 97.0%、`internal/contracts` 96.4% |
 
 ## 1. 历史：已补齐的缺口
 
@@ -88,6 +88,9 @@ Phase 2 完成时的审查中发现，以下 6 处缺口（原"第一类：值�
 | B5 | 并发：领取、lease、Reclaim | 本阶段没有并发代码 | Phase 4 | 多 worker 竞争领取的集成测试（含 `-race`） |
 | B6 | 数据库迁移的集成测试不在 `make test` 中 | 需要 Docker；在 Colima 环境下需设置环境变量（见 `docs/design/coding-conventions.md` §10） | CI 建设时 | CI 中单独运行 `make test-integration` |
 | B7 | `api`、`db`、`schemas` 三个包几乎没有 Go 语句，覆盖率统计对其不适用 | `db` 由集成测试覆盖；`schemas` 由 `internal/config` 的测试间接覆盖 | — | 不需要单独处理 |
+| B9 | attempt 记录脱敏（ADR-0008 D2）：Header、URL、Body 中的敏感名称字段与携带密钥的表达式输出记为 `***`，且在截断前完成 | 规格见 domain-model.md §10；脱敏判定复用 `domain.IsSensitiveName` | Phase 4 | 黄金用例覆盖三个位置、hmac 签名不脱敏、截断边界上的密钥不残留 |
+| B10 | API Key 生成工具；启动时校验哈希格式；双哈希轮换（ADR-0008 D4） | 规格见 domain-model.md §9 | Phase 3 | 生成格式、错误格式拒绝启动、新旧 key 并存期间都能认证，三者都有测试 |
+| B11 | 仓库密钥扫描（ADR-0008 D1 第二道防线） | `make check-secrets` 已检查被跟踪的 `.env` 文件；gitleaks 未安装时跳过扫描并提示 | CI 建设时 | CI 安装固定版本的 gitleaks，`make check-secrets` 在 CI 中必跑 |
 | B8 | 只由服务端校验的规则：metadata key 的格式、payload 大小、不存在的日期 | 由 `api/openapi_test.go` 的 `TestServerOnlyRules` 守护：测试断言 OpenAPI 接受、Go 拒绝；一旦 OpenAPI 也开始拒绝，测试会失败并提示迁移用例 | — | 已覆盖 |
 
 ## 5. 变更记录
@@ -95,3 +98,4 @@ Phase 2 完成时的审查中发现，以下 6 处缺口（原"第一类：值�
 | 日期 | 变更 |
 |---|---|
 | 2026-10-24 | 初始记录。补齐 6 处缺口；`closestBranch` 兜底分支改归 D4；覆盖率从 96.1% 提升到 97.2% |
+| 2026-10-24 | ADR-0008：新增凭据校验（100% 覆盖，未覆盖列表不变）；覆盖率 97.4%；新增行为缺口 B9–B11 |

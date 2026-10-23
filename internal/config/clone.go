@@ -19,6 +19,7 @@ func (d Destination) clone() Destination {
 	out.Auth.Scopes = cloneSlice(d.Auth.Scopes)
 	out.Request.Headers = maps.Clone(d.Request.Headers)
 	out.Request.Body = cloneJSONValue(d.Request.Body)
+	out.AllowLiteral = cloneSlice(d.AllowLiteral)
 	return out
 }
 
