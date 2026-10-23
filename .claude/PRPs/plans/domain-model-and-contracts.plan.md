@@ -36,7 +36,7 @@ PRD 中只有概念草案（实体名称、状态机草图），没有字段级�
 | 响应格式 | 统一信封 `{success, data, error, meta}` | 用户全局编码规范（API Response Format） |
 | ID | UUIDv7（时间有序），PG 中用 `uuid` 类型 | 可排序、可按主键做时间范围查询（借鉴 Svix KSUID 的思路）；Go 用 `github.com/google/uuid` 的 `NewV7` |
 | 重复受理 | 返回 **200**，`duplicate: true`，并带回原 `event_id` | 业务方按 at-least-once 重试提交时无需特殊处理 409 |
-| 无匹配路由 | 事件照常落库，返回 202，`deliveries: []` | 零静默丢失：任何受理的事件都可查询 |
+| 无匹配路由 | 事件照常落库，`routing_status = unrouted`，返回 202，`deliveries: []`，响应中显式带 `routing_status` | 零静默丢失：任何受理的事件都可查询；`unrouted` 事件可按字段筛选、统计和告警（用户要求，2026-10-24） |
 | 鉴权 | 每个来源系统、每个运维主体各一个 API Key（`Authorization: Bearer`）；配置中保存 key 的 SHA-256 引用 | MVP 最简；角色分为 `source` / `operator` / `viewer` |
 | 渲染时机 | 每次 attempt 用**当前配置**渲染；attempt 记录 `config_hash` | 修复错误模板后可直接重放；attempt 可追溯当时用的是哪版配置 |
 | BLOCKED 状态 | 不建显式状态；有序阻塞由调度查询隐式实现，查询 API 返回推导字段 `blocked_by` | 状态机更简单，避免大量额外迁移路径 |
@@ -321,7 +321,12 @@ func TestTransition(t *testing.T) {
   3. **受理语义**：
      - 在**同一事务**中写入 events、event_payloads 以及匹配到的全部 deliveries，提交后执行 `NOTIFY hub_delivery_ready`
      - 重复的 `(source, source_event_id)` 返回 200，`duplicate: true`，带回原始 `event_id` 和 deliveries；**不比较 payload 是否相同**，也不重新路由
-     - 无匹配路由时返回 202，`deliveries: []`
+     - **路由结果显式记录**：
+       - 每个事件都有 `routing_status`：`routed`（至少匹配到一个 Destination）或 `unrouted`（没有匹配到任何路由）
+       - 同时记录 `matched_route_ids`（`unrouted` 时为空数组）和 `routing_config_hash`（受理时生效配置的 `ConfigHash`）
+       - 无匹配路由时照常落库，返回 202，`routing_status: unrouted`，`deliveries: []`
+       - 受理时输出一条 warn 级别日志（`event.unrouted`）；Phase 5 基于该字段提供指标与告警
+       - `unrouted` 事件**不会自动补路由**。补充路由配置后，已受理的 `unrouted` 事件需要业务方重新提交（换新的 `source_event_id`），或等待后续阶段的"重新路由"能力（列入 PRD Open Questions）
   4. **Delivery 状态机**：
 
      | From | Trigger | To | 说明 |
@@ -469,7 +474,8 @@ func TestTransition(t *testing.T) {
 ### Task 5: 领域类型与状态机
 - **ACTION**: 编写 `internal/domain/*.go` 与测试
 - **IMPLEMENT**:
-  - `Event`：字段同 §2，外加 `ID`、`Source`、`IngestSeq`、`ReceivedAt`。提供 `ValidateEnvelope(e) error`，返回 `*ValidationError`，规则与上限都用常量定义
+  - `Event`：字段同 §2，外加 `ID`、`Source`、`IngestSeq`、`ReceivedAt`、`RoutingStatus`、`MatchedRouteIDs`、`RoutingConfigHash`。提供 `ValidateEnvelope(e) error`，返回 `*ValidationError`，规则与上限都用常量定义
+  - `RoutingStatus` 枚举：`RoutingRouted = "routed"`、`RoutingUnrouted = "unrouted"`；提供纯函数 `RoutingStatusFor(matchedRouteIDs []string) RoutingStatus`，使"是否匹配"的判定只有一处实现
   - `Delivery`：`ID`、`EventID`、`DestinationID`、`PolicyID`、`Status`、`OrderingKey`、`IngestSeq`、`AttemptCount`、`ReplayCount`、`ScheduledAt`、`LeaseOwner`、`LeaseExpiresAt`、`Last*`、时间戳。方法 `IsTerminal()`、`IsOrderingSettled(onPredecessorDead)`
   - `Trigger` 枚举：`Claim`、`Reclaim`、`Succeed`、`Retry`、`InfraRetry`、`GiveUp`、`Replay`、`Skip`
   - `Transition` 用一张静态的 `map[DeliveryStatus]map[Trigger]DeliveryStatus` 实现
@@ -492,7 +498,7 @@ func TestTransition(t *testing.T) {
     |---|---|---|---|
     | POST | `/v1/events` | source | 受理；新事件返回 202，重复事件返回 200 |
     | GET | `/v1/events/{event_id}` | all | 事件 + payload + deliveries 摘要（含 `blocked_by`） |
-    | GET | `/v1/events` | all | 过滤：`source_event_id`、`event_type`、`ordering_key`、`status`（任一 delivery 处于该状态）、`received_from`、`received_to`；分页：`cursor`、`limit`（≤ 100，默认 50） |
+    | GET | `/v1/events` | all | 过滤：`source_event_id`、`event_type`、`ordering_key`、`routing_status`（`routed` \| `unrouted`）、`status`（任一 delivery 处于该状态）、`received_from`、`received_to`；分页：`cursor`、`limit`（≤ 100，默认 50） |
     | GET | `/v1/deliveries/{delivery_id}` | all | Delivery + attempts（分页） |
     | GET | `/v1/deliveries` | all | 过滤：`event_id`、`destination_id`、`status`、时间范围；分页同上 |
     | POST | `/v1/deliveries/{delivery_id}/replay` | operator | Body `{reason}`；202；对非法状态返回 409 |
@@ -512,6 +518,7 @@ func TestTransition(t *testing.T) {
     - 413 `payload_too_large`
     - 429 `rate_limited`（预留，Phase 6 使用）
     - 500 `internal`
+  - 受理响应（202 / 200）与事件详情、事件列表中都包含 `routing_status`、`matched_route_ids`；`unrouted` 的受理响应示例必须写进 OpenAPI examples
   - source 角色查询其他来源的事件时返回 **404**，而不是 403，避免泄露事件是否存在
   - 每个请求和响应 schema 都附 `example`
   - fixture：`api/testdata/events/valid/` 中至少 4 个（最小字段集、全字段、嵌套 payload、metadata 到上限）；`invalid/` 中至少 8 个（缺必填、坏 event_type、payload 不是对象、metadata 超项、key 超长、多余字段、坏时间格式、带 source 字段）
@@ -535,9 +542,13 @@ func TestTransition(t *testing.T) {
     - `source text`、`source_event_id text`、`event_type text`
     - `occurred_at timestamptz`、`received_at timestamptz DEFAULT now()`
     - `idempotency_key text NULL`、`ordering_key text NULL`
-    - `metadata jsonb DEFAULT '{}'`、`matched_route_ids text[]`
+    - `metadata jsonb DEFAULT '{}'`
+    - `routing_status text NOT NULL CHECK (routing_status IN ('routed','unrouted'))`
+    - `matched_route_ids text[] NOT NULL DEFAULT '{}'`
+    - `routing_config_hash text NOT NULL`
+    - 一致性约束：`CHECK ((routing_status = 'unrouted') = (cardinality(matched_route_ids) = 0))`，保证两个字段不会互相矛盾
     - `UNIQUE (source, source_event_id)`
-    - 索引：`(event_type, received_at DESC)`、`(received_at DESC)`、`(ordering_key) WHERE ordering_key IS NOT NULL`
+    - 索引：`(event_type, received_at DESC)`、`(received_at DESC)`、`(ordering_key) WHERE ordering_key IS NOT NULL`、`(received_at DESC) WHERE routing_status = 'unrouted'`（供排查与告警查询）
   - `event_payloads`：`event_id uuid PK REFERENCES events ON DELETE CASCADE`、`payload jsonb NOT NULL`、`expires_at timestamptz NULL`，部分索引 `(expires_at) WHERE expires_at IS NOT NULL`
   - `deliveries`：
     - 字段同 Task 5 的 `Delivery`
@@ -560,7 +571,7 @@ func TestTransition(t *testing.T) {
   - 集成测试（`//go:build integration`）：
     1. 启动 PG16 容器
     2. 执行 `goose.Up`
-    3. 断言：重复 `(source, source_event_id)` 插入违反唯一约束；非法 status 违反 CHECK；向 attempts 插入任意时间的数据都会落入 DEFAULT 分区
+    3. 断言：重复 `(source, source_event_id)` 插入违反唯一约束；非法 status 违反 CHECK；`routing_status='unrouted'` 但 `matched_route_ids` 非空（以及反过来）违反一致性 CHECK；向 attempts 插入任意时间的数据都会落入 DEFAULT 分区
     4. `goose.Down` 后所有表都不存在
     5. 再次 `goose.Up` 成功（可重复执行）
 - **MIRROR**: TEST_STRUCTURE
@@ -609,6 +620,8 @@ func TestTransition(t *testing.T) {
 - **IMPLEMENT**:
   - Phase 2 状态改为 `complete`，并链接 plan 和 report（由 prp-implement 完成）
   - Open Questions 中勾选"有序投递的阻塞策略""配置变更的管理方式"
+  - Open Questions 中新增："`unrouted` 事件在补充路由配置后，是否需要提供'重新路由'能力（运维对已受理事件按当前配置重新匹配并生成 Delivery）"
+  - Decisions Log 新增一行："无匹配路由的记录方式 → 显式 `routing_status` 字段 + `routing_config_hash`"
   - Decisions Log 新增三行（链接 ADR-0005 至 0007）
   - 核心概念模型表注明"字段级定义见 `docs/design/domain-model.md`"
 - **VALIDATE**: PRD 中的链接都指向存在的文件
@@ -626,6 +639,7 @@ func TestTransition(t *testing.T) {
 | 事件信封校验 | 各字段处于上限、超出上限 | 上限通过，超出 1 即失败，错误中带字段路径 | 是 |
 | payload 大小 | 256 KiB / 256 KiB + 1 字节 | 通过 / 失败 | 是 |
 | ID 有序 | 连续 1000 个 `NewID()` | 严格递增 | 否 |
+| 路由状态判定 | `RoutingStatusFor(nil)` / `([]string{})` / `([]string{"r1"})` | unrouted / unrouted / routed | 是 |
 | 配置：示例 | `hub.example.yaml` | 加载成功，查找表正确，`ConfigHash` 稳定（加载两次相同） | 否 |
 | 配置：无效用例 | 各 `testdata/invalid/*.yaml` | 每个都给出期望的字段路径与原因 | 是 |
 | 配置：多个错误 | 一个文件包含 3 处错误 | 一次返回 3 条 Problems | 是 |
