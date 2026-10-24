@@ -262,7 +262,7 @@ Route 匹配条件（全部满足才算匹配）：
 ## 8. 按目标隔离
 
 - 每个 Destination 有 `max_in_flight`（默认 10，范围 1–1000）
-- 领取时，同一 Destination 处于 IN_FLIGHT 的 Delivery 数不得超过该值
+- 领取时，同一 Destination 处于 IN_FLIGHT 的 Delivery 数不得超过该值。该上限是**软上限**（Phase 4）：每个 worker 只能看到已提交的在途数，多个 worker 同时领取时，超出量不超过 (worker 数 − 1) × min(单次领取批大小, `max_in_flight`)；单个 worker 时严格遵守。需要严格上限的目标（对端不能承受任何超出）在 Phase 6 的限流中处理
 - 同一个 Event 的多个 Delivery 彼此独立领取、独立完成，**不存在"一个事件的所有目标都完成才释放"的耦合**（PoC S6 中 Svix 的问题）
 
 ---
@@ -296,9 +296,9 @@ Route 匹配条件（全部满足才算匹配）：
 | `started_at`、`duration_ms` | 开始时间与耗时 |
 | `outcome` | `success` \| `retryable` \| `permanent` \| `render_error` \| `infra_error` |
 | `status_code` | 响应状态码（没有响应时为空） |
-| `error` | 错误描述（网络错误、渲染错误类别加原因等） |
-| `request` | 方法、URL、Header、Body |
-| `response` | 状态码、Content-Type、Body |
+| `error` | 错误描述（网络错误、渲染错误类别加原因等），最长 1024 字节；非法 UTF-8 与 U+0000 替换为 U+FFFD |
+| `request` | 方法、URL、Header、Body；在渲染与认证完成之前失败（读取事件或 secret 失败、渲染失败、OAuth2 token 获取失败）时为空。渲染与认证完成但请求未能发出（出口代理不可用、请求非法）时仍记录，便于排查 |
+| `response` | 状态码、Content-Type、Body；没有响应时为空 |
 | `config_hash` | 渲染时生效配置的 `ConfigHash` |
 | `next_attempt_at` | 若进入 RETRY_SCHEDULED，下一次的计划时间 |
 
@@ -310,16 +310,18 @@ Route 匹配条件（全部满足才算匹配）：
 
 | 位置 | 记为 `***` 的部分 |
 |---|---|
-| Header | 名称为敏感名称的 Header，整个值；值中含有携带密钥的表达式的 Header，整个值 |
+| Header | 名称为敏感名称的 Header，整个值；值中含有携带密钥的表达式的 Header，整个值；引用 `request.body` 且管道最后一个函数不是 `sha256` / `hmac_*` 的 Header，整个值（Body 中可能含有密钥，原样复制到 Header 会绕过 Body 的脱敏） |
 | URL | 携带密钥的表达式的输出；名称为敏感名称的查询参数的值 |
-| 请求体 | 所在 key 为敏感名称的叶子值；含有携带密钥的表达式的叶子值（整个叶子） |
-| OAuth2 | 自动附加的 `Authorization: Bearer <token>` 按 Header 规则脱敏；获取 token 的请求与响应**不写入** attempt 记录 |
+| 请求体 | 所在 key 为敏感名称的值（值为对象或数组时整体记为 `***`）；含有携带密钥的表达式的叶子值（整个叶子） |
+| 响应体 | 响应体为一个完整的合法 JSON 值时，所在 key 为敏感名称的值（规则同请求体），防止供应商回显凭据；其他响应体不脱敏 |
+| OAuth2 | 自动附加的 `Authorization: Bearer <token>` 按 Header 规则脱敏；获取 token 的请求与响应**不写入** attempt 记录，token 端点的错误只记录状态码与 OAuth2 错误码 |
 
 - 脱敏在**截断之前**完成，保证截断不会留下部分密钥
-- 响应体不做密钥脱敏（Hub 无法知道供应商会回显什么），只截断；这是已知的残余风险，记录在 ADR-0008
+- 非 JSON 或不完整（超过 1 MiB 读取上限）的响应体不做密钥脱敏，只截断；这是已知的残余风险，记录在 ADR-0008
+- 错误描述不引用请求 URL（查询参数中可能有密钥），网络错误只保留主机与原因
 - 字段级的业务数据脱敏（如 Body 中的邮箱）属于 Phase 6
 
-**截断**：请求体与响应体各截断到 16 KiB（16384 字节），截断时记 `truncated: true`。
+**截断**：请求体与响应体各截断到 16 KiB（16384 字节），截断时记 `truncated: true`；按字节截断时回退到 UTF-8 字符边界。记录中的非法 UTF-8 字节与 U+0000 替换为 U+FFFD（jsonb 无法存储）。
 
 ---
 
@@ -485,6 +487,12 @@ destinations:
 | `eq` / `in` 比较 | 类型不同即不相等，例如 `"0"` 与 `0` 不相等 |
 | Content-Type | 判定不看 Content-Type，只看响应体是否为合法 JSON；空响应体（如 204）不是 JSON |
 | Retry-After | 支持秒数与 HTTP 日期两种格式；HTTP 日期以收到响应的时刻为基准换算；负数、无法解析的值忽略 |
+| 调度所用的时钟 | `scheduled_at`、attempt 的 `next_attempt_at` 与 lease 到期时间都以**数据库时钟**计算（`now()` 加延迟），worker 只提供延迟；worker 时钟只用于 `started_at` 和 Retry-After 日期的换算，因此 worker 与数据库的时钟偏差不会让重试提前或推迟（Phase 4） |
+| lease 时长 | 目标策略的 `timeout` 加 30 秒；接管时以 lease 到期时间作为 fencing token，原 worker 迟到的结果只写 attempt，不改状态（Phase 4） |
+| InfraRetry 的延迟 | 按 §7.4 计算，重试序号取当前 `attempt_count + 1`；由于 `attempt_count` 不增加，持续的基础设施故障以固定间隔重试 |
+| Reclaim 后预算已用尽 | 接管时计入的那次 attempt 若已用完 `max_attempts`，直接 `GiveUp`（DEAD），不再发送 |
+| 渲染出的请求无法发送 | URL 无法解析或协议不是 http / https：outcome 为 `render_error`（`GiveUp`），修复配置后 replay |
+| 处理期间目标被删除 | 领取后、处理前配置重载删除了该目标：`GiveUp`，outcome 为 `permanent`，错误说明配置缺失；尚未领取的 delivery 不会被领取（数据保留，恢复配置后继续投递） |
 
 ### 13.4 API
 
@@ -518,4 +526,4 @@ destinations:
 |---|---|
 | OperatorAction 的外键 | **不级联删除**，审计记录不会被静默删除；因此删除带有 replay / skip 历史的事件前，需要先按保留策略处理审计记录（Phase 5） |
 | `deliveries.ingest_seq` | 从所属事件复制而来，不建外键；用于有序领取时避免关联查询 |
-| 待领取索引 | Phase 2 为 `(scheduled_at) WHERE status IN (...)`；Phase 4 实现按目标公平领取时，若 EXPLAIN 显示需要，再改为 `(destination_id, scheduled_at)` |
+| 待领取索引 | Phase 2 为 `(scheduled_at) WHERE status IN (...)`；Phase 4 按目标领取（每个目标最多取其空闲的 `max_in_flight` 槽位，一个积压的目标不会占满整批），迁移 `00002` 将其替换为 `(destination_id, scheduled_at) WHERE status IN ('PENDING','RETRY_SCHEDULED')`，并由 EXPLAIN 测试断言领取、接管、完成三条语句都不顺序扫描 deliveries |

@@ -203,7 +203,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 | 2 | 领域模型与契约 | 统一事件格式、配置模型（Destination / Route / Policy）、状态机、API 契约、数据库 schema | complete | - | 1 | [plan](../plans/completed/domain-model-and-contracts.plan.md) · [report](../reports/domain-model-and-contracts-report.md) |
 | 2b | 共享运行底座 | 可执行文件与子命令、进程参数、连接池与迁移、配置持有与热重载、secret 解析、API Key、规则求值、测试支架 | complete | - | 2 | [runtime-foundation.plan.md](../plans/completed/runtime-foundation.plan.md)，[报告](../reports/runtime-foundation-report.md) |
 | 3 | 受理与查询 | Ingest API、持久化、去重、状态查询 API、权限 | complete | with 4 | 2b | [ingest-and-query.plan.md](../plans/completed/ingest-and-query.plan.md)，[报告](../reports/ingest-and-query-report.md) |
-| 4 | 投递引擎 | 派发器、模板构造、认证、发送、成功判定、重试、死信、记录脱敏 | in-progress | with 3 | 2b | [delivery-engine.plan.md](../plans/delivery-engine.plan.md) |
+| 4 | 投递引擎 | 派发器、模板构造、认证、发送、成功判定、重试、死信、记录脱敏 | complete | with 3 | 2b | [delivery-engine.plan.md](../plans/completed/delivery-engine.plan.md)，[报告](../reports/delivery-engine-report.md) |
 | 5 | 运维能力 | 人工重放、指标 / 追踪 / 日志、告警、对账任务 | pending | with 6 | 3, 4 | - |
 | 6 | 稳健性增强 | 按目标限流与熔断、有序投递、幂等键透传、脱敏 | pending | with 5 | 4 | - |
 | 7 | 验证与首批接入 | 模拟供应商 + 压测 + 故障注入；首个真实业务接入 | pending | - | 5, 6 | - |
