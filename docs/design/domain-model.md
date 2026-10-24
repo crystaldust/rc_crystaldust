@@ -150,7 +150,8 @@ Route 匹配条件（全部满足才算匹配）：
   - 状态为 `SUCCEEDED` 或 `SKIPPED`
   - `on_predecessor_dead: skip` 时，`DEAD` 也算结清
   - `on_predecessor_dead: block`（默认）时，`DEAD` 不算结清，后续 Delivery 保持 PENDING，直到前序被 replay 成功或被 skip
-- **可见性**：查询 API 为被阻塞的 Delivery 返回 `blocked_by`（最早一个未结清的前序 Delivery 的 id），该字段是推导值，不存库
+- **可见性**：查询 API 为被阻塞的 Delivery 返回 `blocked_by`（最早一个未结清的前序 Delivery 的 id），该字段是推导值，不存库。只为等待领取（PENDING、RETRY_SCHEDULED）的 Delivery 计算
+- **跨来源**：有序范围不区分 source。`source` 角色查询时，如果阻塞它的前序属于其他来源，`blocked_by` 返回 null（§9：只能看到自身来源的数据）；viewer / operator 照常看到。不同来源共用同一个 `ordering_key` 会互相阻塞，`ordering_key` 应由业务方按来源取值（例如带上业务前缀）
 - **业务方义务**：同一个 `ordering_key` 的事件必须**串行提交**（等上一个返回后再提交下一个），否则 Hub 无法知道其业务先后
 
 ---
@@ -459,10 +460,11 @@ destinations:
 | 项 | 约定 |
 |---|---|
 | payload 大小 | 按**请求中 `payload` 字段的原始字节数**计算（含空白），≤ 262144 字节；不重新序列化后再计算 |
-| 重复的 JSON 键 | 当前实现以最后出现的值为准。Phase 3 在 HTTP 层加上严格解析，拒绝重复键（返回 400） |
+| 重复的 JSON 键 | 任意层级（含 payload 内部）出现重复键时返回 400 `validation_failed`，`details[].field` 为重复键的路径（如 `payload.items[1].sku`）；在 HTTP 层先于信封校验执行（Phase 3，`api.CheckStrictJSON`） |
 | 日期合法性 | 以 Go `time.Parse(time.RFC3339)` 为准；`2026-02-31` 这类不存在的日期返回 400（OpenAPI 的格式正则无法表达，属于服务端规则） |
 | metadata key 的格式 | 由服务端校验（OpenAPI 3.0 无法表达 key 的约束） |
 | 空字符串 | 可选字符串字段不允许为空字符串（长度至少为 1）；数据库中"缺省"一律存为 NULL |
+| 请求体的严格 JSON 规则 | 以下情况返回 400 `validation_failed`，`details[].field` 为 JSON 路径（`api.CheckStrictJSON`）：请求体不是合法 UTF-8；任意 key 或字符串含 U+0000（PostgreSQL 的 text / jsonb 不能存储）；数字字面量超过 100 个字符或指数绝对值超过 1000（jsonb numeric 会溢出）；嵌套超过 1000 层。数据库仍拒绝的值（SQLSTATE 22 类）同样返回 400 |
 
 ### 13.2 模板
 
@@ -494,7 +496,9 @@ destinations:
 | replay / skip 请求体 | `reason` 必填，1–500 字符；响应 `data` 为 OperatorAction 记录 |
 | 读取响应中的可选字段 | 缺省的可选字段返回 `null`；`metadata` 缺省时返回 `{}` |
 | 事件列表 | 列表项不包含 payload 与 deliveries，需要时调用详情接口 |
-| 路径参数格式错误 | 非法 UUID 返回 400 `validation_failed` |
+| 路径参数格式错误 | 非法 UUID 返回 400 `validation_failed`；只接受 8-4-4-4-12 的规范格式（不接受 `urn:uuid:`、花括号、无连字符形式） |
+| 查询参数中的字符串 | 必须是合法 UTF-8 且不含 U+0000，否则 400 |
+| 游标分页的一致性 | 列表按 `(received_at / created_at, id)` 倒序做键集分页。`received_at` 是受理事务的开始时间，翻页期间正在提交的事务可能落在已翻过的位置之前而在本轮遍历中漏掉；需要完整对账时按时间范围重新查询 |
 
 ### 13.5 配置
 

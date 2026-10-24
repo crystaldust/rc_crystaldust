@@ -29,6 +29,17 @@
   - `skip`：DEAD 视为已结清，后续 Delivery 继续投递
 - **解除阻塞**：运维对 DEAD 的前序 Delivery 执行 replay（重新投递）或 skip（标记为 SKIPPED），两种操作都写审计记录
 - 不设显式的 BLOCKED 状态，阻塞由调度查询隐式实现
+- **跨来源的 ordering_key**（2026-10-24 补充，用户确认维持现状）：有序范围**不包含 source**。不同来源对同一目标使用相同的 `ordering_key` 时，会落在同一个有序范围内互相等待（一方的 DEAD 在 `block` 模式下会阻塞另一方）。约定 `ordering_key` 由业务方按来源取值（例如带上业务前缀 `order:1001`），写入 `docs/design/domain-model.md` §6
+  - 查询隔离：`source` 角色查询时，属于其他来源的阻塞前序不会出现在 `blocked_by` 中（返回 null），见 domain-model.md §6、§9
+  - 替代方案见下文"跨来源 ordering_key 的替代方案"
+
+### 跨来源 ordering_key 的替代方案（未采用，留作演进）
+
+| Option | 做法 | Pros | Cons |
+|---|---|---|---|
+| **A. 维持现状 + 命名约定**（当前） | 有序范围为 `(destination_id, ordering_key)`；规格要求业务方给 key 加来源前缀 | 无需改动；允许不同来源**有意**共享顺序（例如订单服务与支付服务对同一订单的事件需要整体有序） | 约定无法强制；误用时一个来源可以阻塞另一个来源，且被阻塞方（source 角色）看不到阻塞者 |
+| B. 有序范围加入 source | 有序范围改为 `(destination_id, source, ordering_key)`；需要在 deliveries 上冗余 `source` 列并调整 `deliveries_ordering_idx` | 来源之间互不干扰；`blocked_by` 不再涉及跨来源可见性 | 失去跨来源共享顺序的能力；需要迁移与修订本 ADR；Phase 4 的领取 SQL 要随之调整 |
+| C. 配置化 | Policy 增加 `ordering.scope: destination \| source`，默认其一 | 两种需求都能满足 | 配置项与实现复杂度增加；需要先确认确有两类需求 |
 
 ## Rationale
 
@@ -48,3 +59,12 @@
 
 - 需要跨目标的全局顺序
 - 需要按业务时间戳（而非受理顺序）排序
+- 出现跨来源 `ordering_key` 冲突导致的误阻塞（运营排障中发现，或接入新来源时 key 命名无法统一）：评估改为方案 B 或 C
+- 确认没有任何业务需要跨来源共享顺序：可直接改为方案 B，消除干扰
+
+## Revision History
+
+| 日期 | 变更 |
+|---|---|
+| 2026-10-24 | 初版 |
+| 2026-10-24 | 补充跨来源 `ordering_key` 的行为、查询隔离与替代方案 A/B/C；用户确认维持方案 A（Phase 3 安全审查发现） |

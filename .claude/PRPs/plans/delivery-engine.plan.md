@@ -221,6 +221,7 @@ log.Info("delivery.attempted", "event_id", e, "delivery_id", d, "destination_id"
   - **先脱敏后截断**到 `domain.MaxRecordedBodyBytes`，截断时 `Truncated = true`
   - OAuth2 自动附加的 `Authorization` 按名称规则脱敏
 - **GOTCHA**: 截断按字节，避免切断 UTF-8 字符（回退到合法边界）
+- **GOTCHA**（Phase 3 安全审查补充）：响应体只截断不脱敏，而 source 角色可以通过 `GET /v1/deliveries/{id}` 读到自己事件的 attempts；若供应商在错误响应中回显凭据，会被读到（ADR-0008 残余风险）。至少在响应体中按名称规则对 JSON 叶子做脱敏，或评估对 source 角色隐藏 `response.body`
 - **VALIDATE**: 表驱动：Header / URL / Body 三个位置的两类规则；Header 名含 `signature` 时按名称规则脱敏；截断边界上没有残留的部分密钥
 
 ### Task 5: 出站认证 `internal/outbound/auth.go`
@@ -306,6 +307,8 @@ log.Info("delivery.attempted", "event_id", e, "delivery_id", d, "destination_id"
   - 领取事务只做状态迁移并立即提交，HTTP 调用在事务之外（P1）
   - `max_in_flight` 为软上限（见 KEY_INSIGHT）
   - 有序子查询依赖 `deliveries_ordering_idx`；用 EXPLAIN 验证
+  - （Phase 3 审查补充）`ingest_seq` 在 INSERT 时分配、提交时才可见：并发提交的同 key 事件，较小的 `ingest_seq` 可能晚于较大的可见。领取时"所有更小 `ingest_seq` 的前序都已结清"只对已提交的行成立，§6 把串行提交列为业务方义务；不要假设可见即完整
+  - （Phase 3 补充）NOTIFY 通道名使用 `pg.DeliveryReadyChannel`，不要另写字符串
 - **VALIDATE**: 见 Task 11
 
 ### Task 9: 唤醒 `internal/dispatch/wakeup.go`（P4、P5）
