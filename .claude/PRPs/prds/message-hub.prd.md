@@ -47,7 +47,7 @@ We'll know we're right when 首批接入业务上线后：失败消息零静默�
 
 - [ ] 实际业务规模：峰值 QPS、日事件量、外部目标数量、单事件平均扇出数
 - [ ] 各供应商的限流规则、幂等支持能力、认证方式（API Key / OAuth / 签名）清单
-- [ ] 事件与投递记录的数据保留时长、归档策略
+- [ ] 事件与投递记录的数据保留时长、归档策略 → 部分决定（2026-10-24）：保留期做成进程参数，默认 payload 30 天、attempts 90 天、events 180 天，正式值上线前再定；归档未定（Phase 5 计划）
 - [ ] 各供应商的脱敏要求（字段级哈希、加密存储范围）
 - [x] 配置（路由、目标、策略）变更的管理方式：配置文件 + 版本库 / 管理 API / 审批流 → YAML + Git，ADR-0005
 - [ ] 混合环境下的固定出口 IP 方案（供应商 IP 白名单）
@@ -204,9 +204,9 @@ PENDING → IN_FLIGHT → SUCCEEDED
 | 2b | 共享运行底座 | 可执行文件与子命令、进程参数、连接池与迁移、配置持有与热重载、secret 解析、API Key、规则求值、测试支架 | complete | - | 2 | [runtime-foundation.plan.md](../plans/completed/runtime-foundation.plan.md)，[报告](../reports/runtime-foundation-report.md) |
 | 3 | 受理与查询 | Ingest API、持久化、去重、状态查询 API、权限 | complete | with 4 | 2b | [ingest-and-query.plan.md](../plans/completed/ingest-and-query.plan.md)，[报告](../reports/ingest-and-query-report.md) |
 | 4 | 投递引擎 | 派发器、模板构造、认证、发送、成功判定、重试、死信、记录脱敏 | complete | with 3 | 2b | [delivery-engine.plan.md](../plans/completed/delivery-engine.plan.md)，[报告](../reports/delivery-engine-report.md) |
-| 5 | 运维能力 | 人工重放、指标 / 追踪 / 日志、告警、对账任务 | pending | with 6 | 3, 4 | - |
-| 6 | 稳健性增强 | 按目标限流与熔断、有序投递、幂等键透传、脱敏 | pending | with 5 | 4 | - |
-| 7 | 验证与首批接入 | 模拟供应商 + 压测 + 故障注入；首个真实业务接入 | pending | - | 5, 6 | - |
+| 5 | 运维能力 | 人工重放、指标 / 追踪 / 日志、告警、对账任务 | in-progress | with 6 | 3, 4 | [ops-capabilities.plan.md](../plans/ops-capabilities.plan.md) |
+| 6 | 稳健性增强 | 按目标限流与熔断、有序投递、幂等键透传、脱敏 | in-progress | with 5 | 4 | [robustness.plan.md](../plans/robustness.plan.md) |
+| 7 | 验证与首批接入 | 模拟供应商 + 压测 + 故障注入；首个真实业务接入 | pending | - | 5, 6 | [validation-and-onboarding.plan.md](../plans/validation-and-onboarding.plan.md)（计划已就绪，等 5、6 完成） |
 
 ### Phase Details
 
