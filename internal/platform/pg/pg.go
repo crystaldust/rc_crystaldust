@@ -16,6 +16,12 @@ import (
 	"messagehub/db"
 )
 
+// DeliveryReadyChannel is the NOTIFY channel that wakes workers when
+// deliveries become claimable (domain-model.md §3, ADR-0009 P3). Ingest and
+// operator actions notify it at most once per transaction, without payload;
+// the worker LISTENs on it with a direct connection.
+const DeliveryReadyChannel = "hub_delivery_ready"
+
 // NewPool opens the shared connection pool (pgxpool defaults) and checks
 // that the database answers. The pool may go through pgbouncer.
 func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
