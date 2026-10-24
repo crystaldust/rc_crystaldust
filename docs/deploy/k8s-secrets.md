@@ -17,12 +17,21 @@ Kubernetes Secret  ──(envFrom / secretKeyRef)──►  Hub 进程环境变�
 
 Secret 的键必须与配置中引用的环境变量名一一对应。获取完整列表：
 
-```go
-cfg, _ := config.Load("hub.yaml")
-names := cfg.RequiredEnv() // 排序、去重后的变量名，只读引用，不读取值
+```bash
+messagehub config env --config hub.yaml     # 每行一个变量名（排序、去重；只读引用，不读取值）
+messagehub config check --config hub.yaml   # 校验配置并检查这些变量；退出码 0 通过、1 配置错误、2 变量缺失
 ```
 
-Phase 3 会提供命令行工具直接输出该列表；Hub 启动时也会检查列表中的每个变量都存在且非空，缺失则拒绝启动（`docs/testing/coverage-gaps.md` B4）。
+Hub 启动（`messagehub serve`）与每次 SIGHUP 重载时都会做同样的检查：列表中的变量必须全部存在且非空，principal 的哈希变量必须是 1–2 个逗号分隔的 64 位小写 hex，否则拒绝启动（重载时保留旧配置）。
+
+除了配置引用的变量，进程参数中的数据库连接串也带有密码，**同样放在这个 Secret 中**：
+
+| 键 | 用途 |
+|---|---|
+| `HUB_DATABASE_URL` | 业务连接串，可经过 pgbouncer；`serve`、`migrate up` 必填 |
+| `HUB_DATABASE_LISTEN_URL` | 可选；LISTEN 专用的直连连接串，不能经过事务模式的 pgbouncer（ADR-0009 P4）；不设置时等于 `HUB_DATABASE_URL` |
+
+其余进程参数（`HUB_CONFIG_PATH`、`HUB_HTTP_ADDR`、`HUB_WORKER_ID`、`HUB_WORKER_CONCURRENCY`、`HUB_LOG_LEVEL`、`HUB_SHUTDOWN_TIMEOUT`）不是密钥，放在 Deployment 的 `env` 或 ConfigMap 中。日志中输出的连接串会去掉密码。
 
 示例配置 `config/examples/hub.example.yaml` 需要的键（由 `TestRequiredEnvMatchesExampleConfig` 守护，配置变化时测试会失败并提示同步本文）：
 

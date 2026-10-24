@@ -1,6 +1,8 @@
 GO_FILES := $(shell git ls-files '*.go')
 
-.PHONY: lint test test-integration cover cover-gaps check-secrets build
+.PHONY: lint test test-integration cover cover-gaps cover-gaps-all check-secrets build config-check
+
+CONFIG ?= config/examples/hub.example.yaml
 
 lint:
 	@unformatted="$$(gofmt -l $(GO_FILES))"; \
@@ -28,5 +30,16 @@ check-secrets:
 cover-gaps:
 	bash scripts/cover-gaps.sh
 
+# Same, including integration tests (needs Docker). Packages that only talk to the
+# database are measured with this one.
+cover-gaps-all:
+	COVER_TAGS=integration bash scripts/cover-gaps.sh
+
 build:
 	go build ./...
+	go build -o bin/messagehub ./cmd/messagehub
+
+# Validate CONFIG and check that every environment variable it references is set.
+# Exit code 2 means only environment variables are missing.
+config-check: build
+	bin/messagehub config check --config $(CONFIG)

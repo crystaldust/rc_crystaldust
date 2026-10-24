@@ -124,6 +124,8 @@ Route 匹配条件（全部满足才算匹配）：
 
 共 11 个合法迁移。**其余 37 个"状态 × 触发器"组合都是非法迁移**，返回 `ErrInvalidTransition`。
 
+**持久化要求**（ADR-0009 M2）：每个迁移在数据库中都以**带前置状态条件的更新**完成，例如 Claim 为 `UPDATE … WHERE id=$1 AND status IN ('PENDING','RETRY_SCHEDULED')`；更新到 0 行表示迁移已被其他 worker 完成，调用方放弃即可。这使同一个 delivery 被重复派发时（轮询竞争、日后 MQ 的至少一次投递）不会被重复投递。
+
 ### 5.3 计数与重放规则
 
 - **`attempt_count`**：只在实际发出（或可能已发出）HTTP 请求时加 1

@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-10-24
 - **Deciders**: Message Hub 技术负责人（用户确认，2026-10-24）
-- **Related**: ADR-0001、ADR-0004；`docs/spike/05-stack-evaluation.md` §B
+- **Related**: ADR-0001、ADR-0004；`docs/spike/05-stack-evaluation.md` §B；Evolution Path 由 [ADR-0009](0009-pg-to-mq-migration-path.md) 细化
 
 ## Context
 

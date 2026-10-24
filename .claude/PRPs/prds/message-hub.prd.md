@@ -178,6 +178,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 |------|------------|------------|
 | 慢供应商 / 热点目标拖垮整体投递 | M | 按目标隔离队列与并发；超时 + 熔断 |
 | 状态存储写入压力随规模增长成为瓶颈 | M | 早期设计分区表与归档策略；Attempt 记录可降级存储 |
+| PostgreSQL 派发达到吞吐上限，需要迁移到 MQ | M | ADR-0009：PostgreSQL 始终是状态唯一来源，MQ 只派发；Phase 4 先落实 `Dispatcher` 接口与幂等领取；迁移按"影子 → 试点 → 全量"分步进行，任一步可回滚 |
 | 有序投递与重试、死信交互复杂（前序失败阻塞后续） | M | 有序作为可选策略；阻塞策略列入 Open Questions，Phase 2 明确 |
 | 简单模板映射无法覆盖某些供应商格式 | L-M | 先满足已知供应商；不满足时评估扩展模板能力，而非直接引入脚本 |
 | 混合环境出口 IP 不固定导致供应商白名单失败 | M | 部署设计中预留出口网关 / NAT 方案 |
@@ -200,8 +201,9 @@ PENDING → IN_FLIGHT → SUCCEEDED
 |---|-------|-------------|--------|----------|---------|----------|
 | 1 | 技术验证与选型 | Outpost / Svix 对照评估，确定自建 vs 二次开发；确定语言、MQ、状态存储 | complete | - | - | [plan](../plans/completed/tech-spike-and-selection.plan.md) · [report](../reports/tech-spike-and-selection-report.md) |
 | 2 | 领域模型与契约 | 统一事件格式、配置模型（Destination / Route / Policy）、状态机、API 契约、数据库 schema | complete | - | 1 | [plan](../plans/completed/domain-model-and-contracts.plan.md) · [report](../reports/domain-model-and-contracts-report.md) |
-| 3 | 受理与查询 | Ingest API、持久化、去重、状态查询 API、权限 | pending | with 4 | 2 | - |
-| 4 | 投递引擎 | 路由扇出、模板构造、认证、发送、成功判定、重试、死信 | pending | with 3 | 2 | - |
+| 2b | 共享运行底座 | 可执行文件与子命令、进程参数、连接池与迁移、配置持有与热重载、secret 解析、API Key、规则求值、测试支架 | complete | - | 2 | [runtime-foundation.plan.md](../plans/completed/runtime-foundation.plan.md)，[报告](../reports/runtime-foundation-report.md) |
+| 3 | 受理与查询 | Ingest API、持久化、去重、状态查询 API、权限 | in-progress | with 4 | 2b | [ingest-and-query.plan.md](../plans/ingest-and-query.plan.md) |
+| 4 | 投递引擎 | 派发器、模板构造、认证、发送、成功判定、重试、死信、记录脱敏 | in-progress | with 3 | 2b | [delivery-engine.plan.md](../plans/delivery-engine.plan.md) |
 | 5 | 运维能力 | 人工重放、指标 / 追踪 / 日志、告警、对账任务 | pending | with 6 | 3, 4 | - |
 | 6 | 稳健性增强 | 按目标限流与熔断、有序投递、幂等键透传、脱敏 | pending | with 5 | 4 | - |
 | 7 | 验证与首批接入 | 模拟供应商 + 压测 + 故障注入；首个真实业务接入 | pending | - | 5, 6 | - |
@@ -218,6 +220,11 @@ PENDING → IN_FLIGHT → SUCCEEDED
 - **Scope**: Event 信封 schema、Destination / Route / Delivery Policy 配置 schema、Delivery 状态机、Ingest / Query / Replay API 契约、有序投递阻塞策略决定
 - **Success signal**: schema 与 API 契约文档化并评审通过；契约测试骨架就绪
 
+**Phase 2b: 共享运行底座**（2026-10-24 新增）
+- **Goal**: 让 Phase 3 与 Phase 4 可以完全并行，互不修改对方的文件
+- **Scope**: `messagehub` 可执行文件（config check / env、migrate、keygen、serve --role）；进程参数；连接池、直连连接与迁移；`ConfigHolder` 与 SIGHUP 热重载；`secrets.Resolver` 与启动时的引用检查；入站 API Key 生成与双哈希解析；`internal/rules`（路由匹配与成功判定共用）；集成测试支架 `pgtest`；`api.Run` / `worker.Run` 占位
+- **Success signal**: `config check` 能列出缺失的环境变量；`serve` 能以各角色启动并优雅退出；Phase 3 / 4 只需替换各自的 `Run`
+
 **Phase 3: 受理与查询**
 - **Goal**: 事件可被可靠受理并可查询
 - **Scope**: Ingest API（校验、持久化、去重、返回 event_id）；查询 API（多维筛选、分页、权限）
@@ -226,7 +233,11 @@ PENDING → IN_FLIGHT → SUCCEEDED
 **Phase 4: 投递引擎**
 - **Goal**: 事件按配置可靠投递到多个外部目标
 - **Scope**: 路由扇出、按目标隔离调度、模板请求构造、认证、HTTP 发送、可配置成功判定、指数退避重试、死信
-- **Success signal**: 对模拟供应商（错误码、超时、延迟）的投递行为与策略配置一致
+- **必做的迁移前置要求**（[ADR-0009](../../../docs/adr/0009-pg-to-mq-migration-path.md)，保证日后迁移到 MQ 时不重写 worker）：
+  - M1 `Dispatcher` 接口（领取 / 确认结果 / 重排程），worker 只依赖接口，MVP 实现为 `pgDispatcher`
+  - M2 幂等领取：状态迁移一律经条件更新（`WHERE id=$1 AND status IN (...)`）完成，SKIP LOCKED 只用于找出候选 id
+  - P1–P5 PostgreSQL 队列陷阱的对策：HTTP 调用在事务之外；deliveries 的 autovacuum 与 `fillfactor` 调优；每个受理事务最多一次无 payload 的 NOTIFY；LISTEN 使用直连数据库的专用连接；轮询兜底
+- **Success signal**: 对模拟供应商（错误码、超时、延迟）的投递行为与策略配置一致；黄金用例全部通过；多 worker 竞争领取、重复领取同一 id、lease 过期接管、唤醒丢失后轮询兜底，四类测试全部通过
 
 **Phase 5: 运维能力**
 - **Goal**: 失败可感知、可处置、可追溯
@@ -246,6 +257,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 ### Parallelism Notes
 
 - Phase 3（受理与查询）与 Phase 4（投递引擎）共享 Phase 2 的模型与契约，彼此仅通过存储与队列交互，可并行开发
+- 两者共用的运行底座拆为 Phase 2b 先行完成；底座计划中列出了文件归属，Phase 3 / 4 各自只修改自己拥有的目录（Phase 4 仅在 `cmd/messagehub/serve.go` 有一处接入改动）
 - Phase 5（运维能力）与 Phase 6（稳健性增强）分别建立在已完成的受理/投递链路之上，关注点互不重叠，可并行
 - Phase 1、2 为串行前置：选型与契约决定后续所有实现
 
@@ -269,7 +281,11 @@ PENDING → IN_FLIGHT → SUCCEEDED
 | 开源复用 | 基于开源组件自建，系统借鉴 Outpost / Svix 的设计（[ADR-0001](../../../docs/adr/0001-build-vs-extend.md)，Accepted） | 基于 Outpost / Svix 二次开发 | 按锁定的决策规则：Outpost 82/144、Svix 88/144，均低于 101，且改动面超过 3 个核心模块；两者都存在与零静默丢失冲突的设计 |
 | 实现语言 | Go（[ADR-0002](../../../docs/adr/0002-implementation-language.md)，Accepted） | Java、TypeScript、Rust | 加权 76/85；单一二进制适合混合环境；AI 编码友好；与借鉴代码同语言 |
 | 分发与重试 | MVP 只用 PostgreSQL（SKIP LOCKED + LISTEN/NOTIFY），通过 Dispatcher 接口可演进（[ADR-0003](../../../docs/adr/0003-dispatch-and-retry-queue.md)，Accepted） | PG+Kafka、PG+Redis、PG+RabbitMQ | 加权 64/75；受理事务即 outbox，从架构上保证零静默丢失；组件最少 |
+| 迁移到 MQ 的路径 | PostgreSQL 始终是状态唯一来源，MQ 只派发 delivery_id；幂等领取；重试调度留在 PostgreSQL；按目标切换、分步迁移、可回滚（[ADR-0009](../../../docs/adr/0009-pg-to-mq-migration-path.md)） | 迁移后以 MQ 为主；引入 pgmq 等扩展；MVP 直接上 MQ | 用户判断未来大概率迁移到 MQ（2026-10-24）；该路径迁移时只需替换 Dispatcher 实现并增加中继 |
 | 状态存储 | PostgreSQL，Attempt 同库分区，可演进到列存（[ADR-0004](../../../docs/adr/0004-state-store.md)，Accepted） | MySQL 8 | 加权 58/60；部分索引与 NOTIFY 是 ADR-0003 的前提 |
+| attempt 写入方式 | MVP 与 delivery 状态更新在同一事务中同步写入（ADR-0004 修订） | 异步批量写入 | 用户确认（2026-10-24）：状态与记录始终一致，崩溃不丢记录；异步批量作为规模增长后的演进项 |
+| 共享运行底座 | 拆为独立的 Phase 2b，先于 Phase 3 / 4 完成 | 放在 Phase 3 开头 | 用户确认（2026-10-24）：保证 Phase 3 / 4 并行时不改同一批文件 |
+| 数据库访问方式 | pgx/v5 + 手写 SQL，按领域划分 store / dispatch | sqlc 代码生成 | 用户确认（2026-10-24）：领取、有序等复杂 SQL 直接可写；以集成测试保证正确性 |
 | 配置管理 | YAML + Git，CI 校验，凭据只写 `env:` 引用（[ADR-0005](../../../docs/adr/0005-config-as-yaml-in-git.md)） | DB + Admin API；两者都做 | 配置变更直接影响对外请求，先评审后生效；Git 自带审计 |
 | 模板能力 | 字段路径 + 12 个固定内置函数，无条件与循环（[ADR-0006](../../../docs/adr/0006-template-language-scope.md)） | 只做字段映射；Go text/template | 覆盖哈希、签名等需求，同时保持可预测、易评审 |
 | 有序投递 | 按 `(destination, ordering_key)` 保证受理顺序；前序 DEAD 时按策略 block / skip，默认 block（[ADR-0007](../../../docs/adr/0007-ordering-semantics.md)） | 一律阻塞；一律跳过 | 库存类业务需要阻塞，其他业务可选跳过 |
