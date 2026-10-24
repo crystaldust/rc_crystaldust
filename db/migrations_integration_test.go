@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -19,6 +21,9 @@ const (
 
 	pgUniqueViolation = "23505"
 	pgCheckViolation  = "23514"
+
+	// initialMigration is 00001_init.sql, the version before the tuning migration.
+	initialMigration = 1
 
 	seedEventID    = "00000000-0000-7000-8000-000000000001"
 	seedDeliveryID = "00000000-0000-7000-8000-000000000002"
@@ -150,8 +155,36 @@ func TestMigrations(t *testing.T) {
 		}
 	})
 
+	t.Run("deliveries storage parameters are tuned", func(t *testing.T) {
+		// Act
+		got := deliveriesReloptions(ctx, t, conn)
+
+		// Assert
+		for _, want := range []string{"fillfactor=80", "autovacuum_vacuum_scale_factor=0.02", "autovacuum_analyze_scale_factor=0.02"} {
+			if !slices.Contains(got, want) {
+				t.Errorf("reloptions = %v, missing %s", got, want)
+			}
+		}
+	})
+
+	t.Run("tuning down resets storage parameters", func(t *testing.T) {
+		// Act
+		err := goose.DownTo(conn, MigrationsDir, initialMigration)
+
+		// Assert
+		if err != nil {
+			t.Fatalf("goose down to %d: %v", initialMigration, err)
+		}
+		if got := deliveriesReloptions(ctx, t, conn); len(got) != 0 {
+			t.Errorf("reloptions = %v, want none", got)
+		}
+		if err := goose.Up(conn, MigrationsDir); err != nil {
+			t.Fatalf("goose up: %v", err)
+		}
+	})
+
 	t.Run("down removes all tables", func(t *testing.T) {
-		if err := goose.Down(conn, MigrationsDir); err != nil {
+		if err := goose.DownTo(conn, MigrationsDir, 0); err != nil {
 			t.Fatalf("goose down: %v", err)
 		}
 		for _, table := range append(schemaTables, "attempts_default") {
@@ -237,6 +270,20 @@ func seed(ctx context.Context, t *testing.T, conn *sql.DB) {
 			t.Fatalf("seed: %v\n%s", err, stmt)
 		}
 	}
+}
+
+func deliveriesReloptions(ctx context.Context, t *testing.T, conn *sql.DB) []string {
+	t.Helper()
+	var opts string
+	err := conn.QueryRowContext(ctx,
+		`SELECT coalesce(array_to_string(reloptions, ','), '') FROM pg_class WHERE oid = 'deliveries'::regclass`).Scan(&opts)
+	if err != nil {
+		t.Fatalf("read deliveries reloptions: %v", err)
+	}
+	if opts == "" {
+		return nil
+	}
+	return strings.Split(opts, ",")
 }
 
 func tableExists(ctx context.Context, t *testing.T, conn *sql.DB, table string) bool {

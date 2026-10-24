@@ -68,7 +68,7 @@ OAuth2 获取 token 的请求与响应不写入 attempt 记录。
   - 敏感名称规则基于命名约定，可能出现误报（已提供 `allow_literal`）或漏报（例如供应商使用 `X-Auth: ...` 这类不含关键词的名称）。漏报由密钥扫描兜底
   - 名称包含 `idempotency` 的字段被固定排除（`Idempotency-Key` 是幂等标识，不是凭据）
 - **残余风险**：
-  - 供应商在响应体中回显密钥时，Hub 不会脱敏（无法预知回显内容），只做截断
+  - 供应商在响应体中回显密钥时，Hub 只能按名称规则脱敏合法 JSON 响应体中的值（Phase 4）；非 JSON 或超过读取上限的响应体只做截断（`docs/testing/coverage-gaps.md` B18）
   - 进程环境变量对同一主机上有足够权限的用户可见，依赖容器或主机隔离来防护
 
 ## 实施
@@ -79,7 +79,7 @@ OAuth2 获取 token 的请求与响应不写入 attempt 记录。
 | 模板引用的 secret 必须声明；敏感名称禁止字面量；`allow_literal` | Phase 2 | ✅ 已完成（`internal/config/secrets.go`） |
 | `domain.IsSensitiveName` | Phase 2 | ✅ 已完成 |
 | `.gitignore` 忽略 `.env*`；`make check-secrets` | Phase 2 | ✅ 已完成 |
-| attempt 记录脱敏（D2） | Phase 4 | 待实现（`docs/testing/coverage-gaps.md` B9） |
+| attempt 记录脱敏（D2） | Phase 4 | ✅ 已完成：模板渲染同时产出实际值与脱敏值，`internal/outbound/record.go` 叠加名称规则并先脱敏后截断；JSON 响应体按名称脱敏；OAuth2 token 请求与响应不写入记录（B9） |
 | API Key 生成工具、启动时校验哈希格式、双哈希轮换（D4） | Phase 2b / 3 | ✅ 生成工具（`messagehub keygen`）、哈希解析与常量时间比对、启动与重载时校验格式已实现；认证中间件在 Phase 3（B10） |
 | CI 中运行密钥扫描（D1 第二道防线） | CI 建设时 | 待实现（B11） |
 | 当前阶段采用 Kubernetes Secret（D3） | Phase 2 | ✅ 已决定；部署文档 `docs/deploy/k8s-secrets.md`；`config.RequiredEnv()` 已实现 |
@@ -93,6 +93,7 @@ OAuth2 获取 token 的请求与响应不写入 attempt 记录。
 |---|---|
 | 2026-10-24 | 初版：secret manager 待定 |
 | 2026-10-24 | D3 定案：当前阶段采用 Kubernetes Secret；其他 secret manager 后续通过 External Secrets Operator（K8s）或引用前缀扩展（非 K8s）接入 |
+| 2026-10-24 | Phase 4 实现 D2；按 Phase 3 安全审查的建议，合法 JSON 响应体也按名称规则脱敏，残余风险收窄为非 JSON 响应体 |
 
 ## Revisit When
 
