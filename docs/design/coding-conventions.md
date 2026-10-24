@@ -14,7 +14,9 @@ internal/apikey     入站 API Key 的生成、哈希解析与常量时间比对
 internal/rules      {path, op, value} 规则求值（路由匹配与成功判定共用），只依赖 config
 internal/platform/pg 连接池、直连连接、内嵌迁移的执行
 internal/app        进程参数（HUB_*）、ConfigHolder（原子持有、SIGHUP 重载）、Runtime
-internal/api        HTTP API 角色（Phase 3）
+internal/routing    事件路由（§4），纯函数，依赖 config 与 rules
+internal/store      api 角色的数据访问：受理事务、查询、replay / skip（手写 SQL，参数化）
+internal/api        HTTP API 角色（Phase 3），通过小接口依赖 store
 internal/worker     投递角色（Phase 4）
 internal/testsupport/pgtest  集成测试共用的 PostgreSQL 容器（仅 integration 构建标签）
 cmd/messagehub      唯一的可执行文件：config / migrate / keygen / serve
@@ -84,7 +86,7 @@ db/                 内嵌 SQL 迁移
 - 集成测试使用 build tag `//go:build integration`，通过 testcontainers 启动依赖
 - 黄金用例（`testdata/contracts/`）是行为契约；修改黄金值必须同时修改规格文档
 - 覆盖率 ≥ 80%（`internal/domain` ≥ 90%）
-- 未覆盖的代码必须记录在 `docs/testing/coverage-gaps.md` 中（分类与理由）；`make cover-gaps` 的输出发生变化时，在同一次提交中更新该文件
+- 未覆盖的代码必须记录在 `docs/testing/coverage-gaps.md` 中（分类与理由）；`make cover-gaps-all`（含集成测试，需要 Docker）的输出发生变化时，在同一次提交中更新该文件；只与数据库交互的包（如 `internal/store`）以集成测试衡量覆盖率
 - 测试中不得依赖真实外部服务或当前时间（时间通过参数或时钟接口注入）
 
 ## 9. 依赖

@@ -202,7 +202,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 | 1 | 技术验证与选型 | Outpost / Svix 对照评估，确定自建 vs 二次开发；确定语言、MQ、状态存储 | complete | - | - | [plan](../plans/completed/tech-spike-and-selection.plan.md) · [report](../reports/tech-spike-and-selection-report.md) |
 | 2 | 领域模型与契约 | 统一事件格式、配置模型（Destination / Route / Policy）、状态机、API 契约、数据库 schema | complete | - | 1 | [plan](../plans/completed/domain-model-and-contracts.plan.md) · [report](../reports/domain-model-and-contracts-report.md) |
 | 2b | 共享运行底座 | 可执行文件与子命令、进程参数、连接池与迁移、配置持有与热重载、secret 解析、API Key、规则求值、测试支架 | complete | - | 2 | [runtime-foundation.plan.md](../plans/completed/runtime-foundation.plan.md)，[报告](../reports/runtime-foundation-report.md) |
-| 3 | 受理与查询 | Ingest API、持久化、去重、状态查询 API、权限 | in-progress | with 4 | 2b | [ingest-and-query.plan.md](../plans/ingest-and-query.plan.md) |
+| 3 | 受理与查询 | Ingest API、持久化、去重、状态查询 API、权限 | complete | with 4 | 2b | [ingest-and-query.plan.md](../plans/completed/ingest-and-query.plan.md)，[报告](../reports/ingest-and-query-report.md) |
 | 4 | 投递引擎 | 派发器、模板构造、认证、发送、成功判定、重试、死信、记录脱敏 | in-progress | with 3 | 2b | [delivery-engine.plan.md](../plans/delivery-engine.plan.md) |
 | 5 | 运维能力 | 人工重放、指标 / 追踪 / 日志、告警、对账任务 | pending | with 6 | 3, 4 | - |
 | 6 | 稳健性增强 | 按目标限流与熔断、有序投递、幂等键透传、脱敏 | pending | with 5 | 4 | - |
@@ -285,6 +285,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 | 状态存储 | PostgreSQL，Attempt 同库分区，可演进到列存（[ADR-0004](../../../docs/adr/0004-state-store.md)，Accepted） | MySQL 8 | 加权 58/60；部分索引与 NOTIFY 是 ADR-0003 的前提 |
 | attempt 写入方式 | MVP 与 delivery 状态更新在同一事务中同步写入（ADR-0004 修订） | 异步批量写入 | 用户确认（2026-10-24）：状态与记录始终一致，崩溃不丢记录；异步批量作为规模增长后的演进项 |
 | 共享运行底座 | 拆为独立的 Phase 2b，先于 Phase 3 / 4 完成 | 放在 Phase 3 开头 | 用户确认（2026-10-24）：保证 Phase 3 / 4 并行时不改同一批文件 |
+| 跨来源的 ordering_key | 维持有序范围 `(destination, ordering_key)`，要求业务方按来源给 key 加前缀；source 角色看不到其他来源的阻塞前序 | B：有序范围加入 source；C：Policy 配置有序范围 | 用户确认（2026-10-24）先维持现状；替代方案与重新评估条件见 ADR-0007 |
 | 数据库访问方式 | pgx/v5 + 手写 SQL，按领域划分 store / dispatch | sqlc 代码生成 | 用户确认（2026-10-24）：领取、有序等复杂 SQL 直接可写；以集成测试保证正确性 |
 | 配置管理 | YAML + Git，CI 校验，凭据只写 `env:` 引用（[ADR-0005](../../../docs/adr/0005-config-as-yaml-in-git.md)） | DB + Admin API；两者都做 | 配置变更直接影响对外请求，先评审后生效；Git 自带审计 |
 | 模板能力 | 字段路径 + 12 个固定内置函数，无条件与循环（[ADR-0006](../../../docs/adr/0006-template-language-scope.md)） | 只做字段映射；Go text/template | 覆盖哈希、签名等需求，同时保持可预测、易评审 |
