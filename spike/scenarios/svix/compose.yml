@@ -1,0 +1,30 @@
+# Svix server-v1.102.1 PoC stack: PostgreSQL + Redis, published image (upstream compose builds from source).
+# Credentials below are throwaway dummy values for a local-only spike, not real secrets.
+# SVIX_WHITELIST_SUBNETS opens private ranges so the worker can reach the mock vendor on the host.
+# Never use this whitelist outside the spike.
+name: spike-svix
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_PASSWORD: postgres }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 1s, retries: 60 }
+  redis:
+    image: redis:7.4-alpine
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 1s, retries: 60 }
+  backend:
+    image: svix/svix-server:v1.102.1
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    environment:
+      WAIT_FOR: "true"
+      SVIX_JWT_SECRET: spike-jwt-secret
+      SVIX_DB_DSN: postgresql://postgres:postgres@postgres/postgres
+      SVIX_REDIS_DSN: redis://redis:6379
+      SVIX_QUEUE_TYPE: redis
+      SVIX_RETRY_SCHEDULE: "1,2,4"
+      SVIX_WHITELIST_SUBNETS: '["0.0.0.0/0"]'
+      SVIX_LOG_LEVEL: info
+    ports: ["127.0.0.1:8071:8071"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }

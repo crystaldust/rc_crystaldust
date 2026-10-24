@@ -1,0 +1,10 @@
+{
+  "vendor_a_attempts": [
+    {
+      "status": "success",
+      "code": "200",
+      "time": "2026-10-23T17:10:50.784617Z"
+    }
+  ],
+  "vendor_a_requests": 1
+}

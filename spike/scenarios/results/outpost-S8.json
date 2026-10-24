@@ -1,0 +1,18 @@
+{
+  "events": 3000,
+  "rate_per_s": 50,
+  "publish_errors": 0,
+  "publish_api_p99_ms": 15.9,
+  "vendor-a": {
+    "received": 3000,
+    "p50_ms": 24.1,
+    "p99_ms": 56.2,
+    "max_ms": 131.1
+  },
+  "vendor-b": {
+    "received": 3000,
+    "p50_ms": 24.5,
+    "p99_ms": 57.0,
+    "max_ms": 129.8
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "requests_until_exhausted": 4,
+  "attempts_before_replay": [
+    {
+      "status": 2,
+      "code": 500,
+      "time": "2026-10-23T17:18:12.220503Z"
+    },
+    {
+      "status": 2,
+      "code": 500,
+      "time": "2026-10-23T17:18:07.169227Z"
+    },
+    {
+      "status": 2,
+      "code": 500,
+      "time": "2026-10-23T17:18:04.303055Z"
+    },
+    {
+      "status": 2,
+      "code": 500,
+      "time": "2026-10-23T17:18:02.734528Z"
+    }
+  ],
+  "replay_response": [
+    202,
+    {}
+  ],
+  "requests_after_replay": 5,
+  "attempts_after_replay": [
+    {
+      "status": 0,
+      "code": 200,
+      "time": "2026-10-23T17:18:27.696734Z"
+    },
+    {
+      "status": 2,
+      "code": 500,
+      "time": "2026-10-23T17:18:12.220503Z"
+    },
+    {
+      "status": 2,
+      "code": 500,
+      "time": "2026-10-23T17:18:07.169227Z"
+    },
+    {
+      "status": 2,
+      "code": 500,
+      "time": "2026-10-23T17:18:04.303055Z"
+    },
+    {
+      "status": 2,
+      "code": 500,
+      "time": "2026-10-23T17:18:02.734528Z"
+    }
+  ]
+}
