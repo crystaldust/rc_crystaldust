@@ -56,7 +56,7 @@ So that 业务系统无需自行实现调用、重试与排障，同时在投递
 | P0 | `db/migrations/00001_init.sql` | 9–170 | 表结构、约束、索引（列名必须逐一对应） |
 | P0 | `internal/domain/event.go` | 84–117 | `ParseEnvelope`、`ErrPayloadTooLarge`、`RoutingStatusFor` |
 | P0 | `internal/domain/delivery_state.go` | 26–46 | `Transition`：replay / skip 的合法性判断只能经过它 |
-| P0 | `.claude/PRPs/plans/runtime-foundation.plan.md` | Task 4–9 | `app.Runtime`、`ConfigHolder`、`secrets.Resolver`、`apikey`、`rules`、`pgtest` 的接口 |
+| P0 | `.claude/PRPs/plans/completed/runtime-foundation.plan.md`（实际接口与偏离见 `.claude/PRPs/reports/runtime-foundation-report.md`） | Task 4–9 | `app.Runtime`、`ConfigHolder`、`secrets.Resolver`、`apikey`、`rules`、`pgtest` 的接口 |
 | P1 | `docs/adr/0009-pg-to-mq-migration-path.md` | M2、P3 | 条件更新；每个事务最多一次无 payload 的 NOTIFY |
 | P1 | `docs/adr/0008-secrets-management.md` | D4 | 入站 key 的哈希匹配与双哈希 |
 | P1 | `api/openapi_test.go` | all | 加载 spec 的方式；fixture 校验 |

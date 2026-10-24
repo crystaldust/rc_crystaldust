@@ -201,7 +201,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 |---|-------|-------------|--------|----------|---------|----------|
 | 1 | 技术验证与选型 | Outpost / Svix 对照评估，确定自建 vs 二次开发；确定语言、MQ、状态存储 | complete | - | - | [plan](../plans/completed/tech-spike-and-selection.plan.md) · [report](../reports/tech-spike-and-selection-report.md) |
 | 2 | 领域模型与契约 | 统一事件格式、配置模型（Destination / Route / Policy）、状态机、API 契约、数据库 schema | complete | - | 1 | [plan](../plans/completed/domain-model-and-contracts.plan.md) · [report](../reports/domain-model-and-contracts-report.md) |
-| 2b | 共享运行底座 | 可执行文件与子命令、进程参数、连接池与迁移、配置持有与热重载、secret 解析、API Key、规则求值、测试支架 | in-progress | - | 2 | [runtime-foundation.plan.md](../plans/runtime-foundation.plan.md) |
+| 2b | 共享运行底座 | 可执行文件与子命令、进程参数、连接池与迁移、配置持有与热重载、secret 解析、API Key、规则求值、测试支架 | complete | - | 2 | [runtime-foundation.plan.md](../plans/completed/runtime-foundation.plan.md)，[报告](../reports/runtime-foundation-report.md) |
 | 3 | 受理与查询 | Ingest API、持久化、去重、状态查询 API、权限 | in-progress | with 4 | 2b | [ingest-and-query.plan.md](../plans/ingest-and-query.plan.md) |
 | 4 | 投递引擎 | 派发器、模板构造、认证、发送、成功判定、重试、死信、记录脱敏 | in-progress | with 3 | 2b | [delivery-engine.plan.md](../plans/delivery-engine.plan.md) |
 | 5 | 运维能力 | 人工重放、指标 / 追踪 / 日志、告警、对账任务 | pending | with 6 | 3, 4 | - |

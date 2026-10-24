@@ -80,11 +80,11 @@ OAuth2 获取 token 的请求与响应不写入 attempt 记录。
 | `domain.IsSensitiveName` | Phase 2 | ✅ 已完成 |
 | `.gitignore` 忽略 `.env*`；`make check-secrets` | Phase 2 | ✅ 已完成 |
 | attempt 记录脱敏（D2） | Phase 4 | 待实现（`docs/testing/coverage-gaps.md` B9） |
-| API Key 生成工具、启动时校验哈希格式、双哈希轮换（D4） | Phase 3 | 待实现（B10） |
+| API Key 生成工具、启动时校验哈希格式、双哈希轮换（D4） | Phase 2b / 3 | ✅ 生成工具（`messagehub keygen`）、哈希解析与常量时间比对、启动与重载时校验格式已实现；认证中间件在 Phase 3（B10） |
 | CI 中运行密钥扫描（D1 第二道防线） | CI 建设时 | 待实现（B11） |
 | 当前阶段采用 Kubernetes Secret（D3） | Phase 2 | ✅ 已决定；部署文档 `docs/deploy/k8s-secrets.md`；`config.RequiredEnv()` 已实现 |
 | Kubernetes 清单（Secret 模板、Deployment）落地到 `deploy/k8s/` | 部署方案阶段 | 待实现（B12） |
-| 启动时检查 `RequiredEnv()` 中的变量全部存在 | Phase 3 | 待实现（B4） |
+| 启动时检查 `RequiredEnv()` 中的变量全部存在 | Phase 2b | ✅ 已实现：`secrets.CheckRequired`，启动、SIGHUP 重载与 `messagehub config check` 都会执行（B4） |
 | 其他 secret manager（Vault、云 KMS 等）与非 Kubernetes 环境的注入 | 按需 | 待决定（PRD Open Questions） |
 
 ## Revision History

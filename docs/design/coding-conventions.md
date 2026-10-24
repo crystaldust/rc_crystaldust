@@ -9,11 +9,22 @@
 internal/domain     核心类型与纯规则，不依赖任何内部包
 internal/config     配置加载与校验，只依赖 domain 与 schemas
 internal/contracts  黄金用例加载器，只依赖标准库与 YAML
+internal/secrets    解析 env: 引用、启动时检查缺失变量，只依赖 config
+internal/apikey     入站 API Key 的生成、哈希解析与常量时间比对，只依赖标准库
+internal/rules      {path, op, value} 规则求值（路由匹配与成功判定共用），只依赖 config
+internal/platform/pg 连接池、直连连接、内嵌迁移的执行
+internal/app        进程参数（HUB_*）、ConfigHolder（原子持有、SIGHUP 重载）、Runtime
+internal/api        HTTP API 角色（Phase 3）
+internal/worker     投递角色（Phase 4）
+internal/testsupport/pgtest  集成测试共用的 PostgreSQL 容器（仅 integration 构建标签）
+cmd/messagehub      唯一的可执行文件：config / migrate / keygen / serve
 schemas/            内嵌 JSON Schema
 api/                OpenAPI 契约
 db/                 内嵌 SQL 迁移
 （Phase 3+）服务层  依赖 domain 与 config；domain 永远不反向依赖服务层
 ```
+
+- 依赖方向：`cmd` → `internal/api`、`internal/worker` → `internal/app` → `secrets`、`apikey`、`platform/pg` → `config` → `domain`；角色包只读使用 `app.Runtime`，每次处理请求或投递都调用 `Runtime.Config.Current()`，不缓存 `*config.Config`
 
 - 包名为小写单词，按领域划分；禁止 `utils`、`common`、`helpers` 这类包名
 - 每个包在 `doc` 注释（首个文件的 `// Package xxx ...`）中写明职责与依赖边界

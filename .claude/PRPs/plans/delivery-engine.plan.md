@@ -64,7 +64,7 @@ serve --role=worker
 | P0 | `internal/domain/sensitive.go` | all | `IsSensitiveName`（与配置校验共用） |
 | P0 | `internal/contracts/template.go`、`success.go`、`retry.go` | 类型定义与 `Load*Cases` | 黄金用例的结构（注意 `contracts.BodyRule` 需转换为 `config.Rule`） |
 | P0 | `db/migrations/00001_init.sql` | 60–150 | deliveries / attempts 的列与索引 |
-| P0 | `.claude/PRPs/plans/runtime-foundation.plan.md` | Task 1、4、6、7、8、9 | Settings、Resolver、rules、ConfigHolder、Runtime、`configOptions()` |
+| P0 | `.claude/PRPs/plans/completed/runtime-foundation.plan.md`（实际接口与偏离见 `.claude/PRPs/reports/runtime-foundation-report.md`） | Task 1、4、6、7、8、9 | Settings、Resolver、rules、ConfigHolder、Runtime、`configOptions()` |
 | P1 | `docs/adr/0007-ordering-semantics.md` | Decision | 有序范围与 block / skip |
 | P1 | `internal/config/types.go` | Policy、Destination、Auth、Request | 策略与请求模板的结构 |
 | P1 | `docs/spike/03-svix-evaluation.md` | §7 | 退避与 jitter、响应体截断的参考实现 |
