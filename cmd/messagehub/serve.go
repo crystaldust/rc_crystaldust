@@ -17,6 +17,7 @@ import (
 	"messagehub/internal/config"
 	"messagehub/internal/platform/pg"
 	"messagehub/internal/secrets"
+	"messagehub/internal/template"
 	"messagehub/internal/worker"
 )
 
@@ -44,9 +45,8 @@ var (
 )
 
 // configOptions are the config loading options used by every command.
-// Phase 4 adds the template validator here.
 func configOptions() []config.Option {
-	return nil
+	return []config.Option{config.WithTemplateValidator(template.ValidateField)}
 }
 
 func (c cli) serve(args []string) int {
