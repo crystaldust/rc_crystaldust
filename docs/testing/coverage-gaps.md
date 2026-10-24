@@ -85,7 +85,7 @@ Phase 2 完成时的审查中发现，以下 6 处缺口（原"第一类：值�
 | B2 | OpenAPI 只做了文档与示例校验，没有针对运行中服务的契约测试 | HTTP 服务尚未实现 | Phase 3 | 对每个端点的请求与响应做 schema 校验的契约测试 |
 | B3 | 受理请求中有重复 JSON 键时，以最后一个值为准，没有测试 | 已在 domain-model.md §13.1 记录 | Phase 3 | HTTP 层拒绝重复键（400），并有测试 |
 | B4 | 配置热重载（SIGHUP）与运行时解析 `env:` 引用 | `config.RequiredEnv()` 已能列出全部被引用的变量（已测试）；读取与校验尚未实现 | Phase 3 / 4 | 重载成功、重载失败时保留旧配置、引用的环境变量缺失时拒绝启动，三种情况都有测试 |
-| B5 | 并发：领取、lease、Reclaim | 本阶段没有并发代码 | Phase 4 | 多 worker 竞争领取的集成测试（含 `-race`） |
+| B5 | 并发：领取、lease、Reclaim（ADR-0009 M2、P5） | 本阶段没有并发代码 | Phase 4 | 集成测试（含 `-race`）覆盖：多 worker 竞争领取、重复领取同一 id 只成功一次、lease 过期接管、NOTIFY 丢失后轮询兜底 |
 | B6 | 数据库迁移的集成测试不在 `make test` 中 | 需要 Docker；在 Colima 环境下需设置环境变量（见 `docs/design/coding-conventions.md` §10） | CI 建设时 | CI 中单独运行 `make test-integration` |
 | B7 | `api`、`db`、`schemas` 三个包几乎没有 Go 语句，覆盖率统计对其不适用 | `db` 由集成测试覆盖；`schemas` 由 `internal/config` 的测试间接覆盖 | — | 不需要单独处理 |
 | B9 | attempt 记录脱敏（ADR-0008 D2）：Header、URL、Body 中的敏感名称字段与携带密钥的表达式输出记为 `***`，且在截断前完成 | 规格见 domain-model.md §10；脱敏判定复用 `domain.IsSensitiveName` | Phase 4 | 黄金用例覆盖三个位置、hmac 签名不脱敏、截断边界上的密钥不残留 |

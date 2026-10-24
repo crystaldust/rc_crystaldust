@@ -178,6 +178,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 |------|------------|------------|
 | 慢供应商 / 热点目标拖垮整体投递 | M | 按目标隔离队列与并发；超时 + 熔断 |
 | 状态存储写入压力随规模增长成为瓶颈 | M | 早期设计分区表与归档策略；Attempt 记录可降级存储 |
+| PostgreSQL 派发达到吞吐上限，需要迁移到 MQ | M | ADR-0009：PostgreSQL 始终是状态唯一来源，MQ 只派发；Phase 4 先落实 `Dispatcher` 接口与幂等领取；迁移按"影子 → 试点 → 全量"分步进行，任一步可回滚 |
 | 有序投递与重试、死信交互复杂（前序失败阻塞后续） | M | 有序作为可选策略；阻塞策略列入 Open Questions，Phase 2 明确 |
 | 简单模板映射无法覆盖某些供应商格式 | L-M | 先满足已知供应商；不满足时评估扩展模板能力，而非直接引入脚本 |
 | 混合环境出口 IP 不固定导致供应商白名单失败 | M | 部署设计中预留出口网关 / NAT 方案 |
@@ -226,7 +227,11 @@ PENDING → IN_FLIGHT → SUCCEEDED
 **Phase 4: 投递引擎**
 - **Goal**: 事件按配置可靠投递到多个外部目标
 - **Scope**: 路由扇出、按目标隔离调度、模板请求构造、认证、HTTP 发送、可配置成功判定、指数退避重试、死信
-- **Success signal**: 对模拟供应商（错误码、超时、延迟）的投递行为与策略配置一致
+- **必做的迁移前置要求**（[ADR-0009](../../../docs/adr/0009-pg-to-mq-migration-path.md)，保证日后迁移到 MQ 时不重写 worker）：
+  - M1 `Dispatcher` 接口（领取 / 确认结果 / 重排程），worker 只依赖接口，MVP 实现为 `pgDispatcher`
+  - M2 幂等领取：状态迁移一律经条件更新（`WHERE id=$1 AND status IN (...)`）完成，SKIP LOCKED 只用于找出候选 id
+  - P1–P5 PostgreSQL 队列陷阱的对策：HTTP 调用在事务之外；deliveries 的 autovacuum 与 `fillfactor` 调优；每个受理事务最多一次无 payload 的 NOTIFY；LISTEN 使用直连数据库的专用连接；轮询兜底
+- **Success signal**: 对模拟供应商（错误码、超时、延迟）的投递行为与策略配置一致；黄金用例全部通过；多 worker 竞争领取、重复领取同一 id、lease 过期接管、唤醒丢失后轮询兜底，四类测试全部通过
 
 **Phase 5: 运维能力**
 - **Goal**: 失败可感知、可处置、可追溯
@@ -269,6 +274,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 | 开源复用 | 基于开源组件自建，系统借鉴 Outpost / Svix 的设计（[ADR-0001](../../../docs/adr/0001-build-vs-extend.md)，Accepted） | 基于 Outpost / Svix 二次开发 | 按锁定的决策规则：Outpost 82/144、Svix 88/144，均低于 101，且改动面超过 3 个核心模块；两者都存在与零静默丢失冲突的设计 |
 | 实现语言 | Go（[ADR-0002](../../../docs/adr/0002-implementation-language.md)，Accepted） | Java、TypeScript、Rust | 加权 76/85；单一二进制适合混合环境；AI 编码友好；与借鉴代码同语言 |
 | 分发与重试 | MVP 只用 PostgreSQL（SKIP LOCKED + LISTEN/NOTIFY），通过 Dispatcher 接口可演进（[ADR-0003](../../../docs/adr/0003-dispatch-and-retry-queue.md)，Accepted） | PG+Kafka、PG+Redis、PG+RabbitMQ | 加权 64/75；受理事务即 outbox，从架构上保证零静默丢失；组件最少 |
+| 迁移到 MQ 的路径 | PostgreSQL 始终是状态唯一来源，MQ 只派发 delivery_id；幂等领取；重试调度留在 PostgreSQL；按目标切换、分步迁移、可回滚（[ADR-0009](../../../docs/adr/0009-pg-to-mq-migration-path.md)） | 迁移后以 MQ 为主；引入 pgmq 等扩展；MVP 直接上 MQ | 用户判断未来大概率迁移到 MQ（2026-10-24）；该路径迁移时只需替换 Dispatcher 实现并增加中继 |
 | 状态存储 | PostgreSQL，Attempt 同库分区，可演进到列存（[ADR-0004](../../../docs/adr/0004-state-store.md)，Accepted） | MySQL 8 | 加权 58/60；部分索引与 NOTIFY 是 ADR-0003 的前提 |
 | 配置管理 | YAML + Git，CI 校验，凭据只写 `env:` 引用（[ADR-0005](../../../docs/adr/0005-config-as-yaml-in-git.md)） | DB + Admin API；两者都做 | 配置变更直接影响对外请求，先评审后生效；Git 自带审计 |
 | 模板能力 | 字段路径 + 12 个固定内置函数，无条件与循环（[ADR-0006](../../../docs/adr/0006-template-language-scope.md)） | 只做字段映射；Go text/template | 覆盖哈希、签名等需求，同时保持可预测、易评审 |
