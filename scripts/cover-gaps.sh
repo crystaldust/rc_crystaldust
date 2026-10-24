@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # List every code block no test executes, merged across all test binaries.
 # Usage: scripts/cover-gaps.sh            (from the repo root, or via `make cover-gaps`)
+#        COVER_TAGS=integration scripts/cover-gaps.sh   (`make cover-gaps-all`: also runs the
+#        integration tests, which need Docker; see coding-conventions.md §10)
 # The list is the input for docs/testing/coverage-gaps.md; review it whenever coverage changes.
 set -euo pipefail
 
 profile="$(mktemp)"
 trap 'rm -f "$profile"' EXIT
 
-go test -count=1 -coverpkg=./... -coverprofile="$profile" ./... >/dev/null
+go test -count=1 -tags "${COVER_TAGS:-}" -coverpkg=./... -coverprofile="$profile" ./... >/dev/null
 
 # With -coverpkg a block appears once per test binary; it is covered if any binary ran it.
 awk 'NR > 1 { if (!($1 in hit) || $3 > hit[$1]) hit[$1] = $3 }

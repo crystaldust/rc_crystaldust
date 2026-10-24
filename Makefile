@@ -1,6 +1,6 @@
 GO_FILES := $(shell git ls-files '*.go')
 
-.PHONY: lint test test-integration cover cover-gaps check-secrets build config-check
+.PHONY: lint test test-integration cover cover-gaps cover-gaps-all check-secrets build config-check
 
 CONFIG ?= config/examples/hub.example.yaml
 
@@ -29,6 +29,11 @@ check-secrets:
 # Uncovered blocks across all packages; compare with docs/testing/coverage-gaps.md.
 cover-gaps:
 	bash scripts/cover-gaps.sh
+
+# Same, including integration tests (needs Docker). Packages that only talk to the
+# database are measured with this one.
+cover-gaps-all:
+	COVER_TAGS=integration bash scripts/cover-gaps.sh
 
 build:
 	go build ./...
