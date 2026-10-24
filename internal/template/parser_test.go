@@ -37,13 +37,20 @@ func TestValidateFieldInfersLocationFromField(t *testing.T) {
 	}
 }
 
-func TestExampleConfigPassesTemplateValidation(t *testing.T) {
-	// Act
-	_, err := config.Load("../../config/examples/hub.example.yaml", config.WithTemplateValidator(ValidateField))
+func TestExampleConfigsPassTemplateValidation(t *testing.T) {
+	for _, path := range []string{
+		"../../config/examples/hub.example.yaml",
+		"../../config/examples/local-demo.yaml",
+	} {
+		t.Run(path, func(t *testing.T) {
+			// Act
+			_, err := config.Load(path, config.WithTemplateValidator(ValidateField))
 
-	// Assert
-	if err != nil {
-		t.Fatalf("example config rejected: %v", err)
+			// Assert
+			if err != nil {
+				t.Fatalf("example config rejected: %v", err)
+			}
+		})
 	}
 }
 

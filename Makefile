@@ -1,6 +1,6 @@
 GO_FILES := $(shell git ls-files '*.go')
 
-.PHONY: lint test test-integration cover cover-gaps cover-gaps-all check-secrets build config-check
+.PHONY: lint test test-integration cover cover-gaps cover-gaps-all check-secrets build config-check demo
 
 CONFIG ?= config/examples/hub.example.yaml
 
@@ -43,3 +43,9 @@ build:
 # Exit code 2 means only environment variables are missing.
 config-check: build
 	bin/messagehub config check --config $(CONFIG)
+
+# End-to-end demo on a laptop: PostgreSQL (Docker), mock vendor and the hub with
+# config/examples/local-demo.yaml (docs/testing/local-testing.md). KEEP=1 leaves
+# everything running.
+demo:
+	bash scripts/demo.sh

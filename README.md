@@ -45,5 +45,16 @@ flowchart LR
 > 不采用，前期先定义好数据格式、字段和功能，后续有实际业务需求时，经过讨论再确定是否引入、引入什么方案
 
 
+# 如何运行与测试
+
+```bash
+make test               # 单元测试（不需要 Docker）
+make test-integration   # 含集成与端到端测试（需要 Docker）
+make demo               # 本地一键演示：PostgreSQL + 模拟供应商 + Hub，提交事件并展示成功 / 重试 / 死信 / 重放
+```
+
+前置条件、Colima 与代理设置、手工调用 API 的步骤见 [`docs/testing/local-testing.md`](docs/testing/local-testing.md)。
+
+
 # AI对话记录
 在根目录`dialogs_with_ai.txt.zip`文件
