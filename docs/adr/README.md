@@ -11,5 +11,6 @@
 | [ADR-0007](0007-ordering-semantics.md) | 有序投递按目标和 ordering_key 保证受理顺序，前序死信默认阻塞 | Accepted | 2026-10-24 |
 | [ADR-0008](0008-secrets-management.md) | 密钥管理：配置只写引用、运行时注入、记录脱敏、API Key 强度约束 | Accepted | 2026-10-24 |
 | [ADR-0009](0009-pg-to-mq-migration-path.md) | 从 PostgreSQL 派发平滑迁移到 MQ 的路径（细化 ADR-0003） | Accepted | 2026-10-24 |
+| [ADR-0010](0010-max-in-flight-soft-limit.md) | max_in_flight 暂采用软上限，保留改为严格上限的路径 | Accepted（暂定，预期修订） | 2026-10-24 |
 
 格式约定见 `.claude/PRPs/plans/completed/tech-spike-and-selection.plan.md` 的 ADR_FORMAT。评审通过后，把状态改为 `Accepted`。

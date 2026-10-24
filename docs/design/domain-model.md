@@ -262,7 +262,7 @@ Route 匹配条件（全部满足才算匹配）：
 ## 8. 按目标隔离
 
 - 每个 Destination 有 `max_in_flight`（默认 10，范围 1–1000）
-- 领取时，同一 Destination 处于 IN_FLIGHT 的 Delivery 数不得超过该值。该上限是**软上限**（Phase 4）：每个 worker 只能看到已提交的在途数，多个 worker 同时领取时，超出量不超过 (worker 数 − 1) × min(单次领取批大小, `max_in_flight`)；单个 worker 时严格遵守。需要严格上限的目标（对端不能承受任何超出）在 Phase 6 的限流中处理
+- 领取时，同一 Destination 处于 IN_FLIGHT 的 Delivery 数不得超过该值。该上限是**软上限**（Phase 4）：每个 worker 只能看到已提交的在途数，多个 worker 同时领取时，超出量不超过 (worker 数 − 1) × min(单次领取批大小, `max_in_flight`)；单个 worker 时严格遵守。这是暂定方案，改为严格上限的备选方案与重新评估条件见 ADR-0010
 - 同一个 Event 的多个 Delivery 彼此独立领取、独立完成，**不存在"一个事件的所有目标都完成才释放"的耦合**（PoC S6 中 Svix 的问题）
 
 ---

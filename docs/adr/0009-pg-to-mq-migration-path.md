@@ -50,7 +50,7 @@ MVP：    受理 ──事务──► deliveries ──NOTIFY/轮询──► W
 | M3 | **消息契约**：MQ 消息只携带 `delivery_id`，以及用于路由的 `destination_id`、`ordering_key`；不携带 payload 或模板结果 | 迁移时 |
 | M4 | **重试调度留在 PostgreSQL**：退避计算与 `scheduled_at` 不变；迁移后由调度器把到期任务重新发布到 MQ，不依赖 MQ 的延迟消息能力 | MVP 已如此；迁移时加发布 |
 | M5 | **按目标切换派发方式**：Destination 配置增加 `dispatch: pg \| mq`（默认 `pg`），可按目标试点与回滚 | 迁移时（MVP 不加该字段，避免"配置了却不生效"） |
-| M6 | **有序与隔离不依赖 MQ 语义**：分区键为 `destination_id + ordering_key`；领取前仍在库中检查前序 Delivery 是否结清（ADR-0007）；按目标的 `max_in_flight` 仍由领取逻辑控制 | 迁移时（复用现有检查） |
+| M6 | **有序与隔离不依赖 MQ 语义**：分区键为 `destination_id + ordering_key`；领取前仍在库中检查前序 Delivery 是否结清（ADR-0007）；按目标的 `max_in_flight` 仍由领取逻辑控制（当前为软上限，见 ADR-0010） | 迁移时（复用现有检查） |
 
 ### MVP 阶段必须规避的 PostgreSQL 队列陷阱（Phase 4 必做）
 
