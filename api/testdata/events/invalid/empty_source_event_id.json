@@ -1,0 +1,8 @@
+{
+  "source_event_id": "",
+  "event_type": "order.paid",
+  "occurred_at": "2026-10-24T08:30:00Z",
+  "payload": {
+    "order_id": "1001"
+  }
+}

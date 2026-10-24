@@ -1,0 +1,31 @@
+{
+  "source_event_id": "ord-1001",
+  "event_type": "order.paid",
+  "occurred_at": "2026-10-24T08:30:00Z",
+  "payload": {
+    "order_id": "1001"
+  },
+  "metadata": {
+    "key_00": "vvvvvvvv",
+    "key_01": "vvvvvvvv",
+    "key_02": "vvvvvvvv",
+    "key_03": "vvvvvvvv",
+    "key_04": "vvvvvvvv",
+    "key_05": "vvvvvvvv",
+    "key_06": "vvvvvvvv",
+    "key_07": "vvvvvvvv",
+    "key_08": "vvvvvvvv",
+    "key_09": "vvvvvvvv",
+    "key_10": "vvvvvvvv",
+    "key_11": "vvvvvvvv",
+    "key_12": "vvvvvvvv",
+    "key_13": "vvvvvvvv",
+    "key_14": "vvvvvvvv",
+    "key_15": "vvvvvvvv",
+    "key_16": "vvvvvvvv",
+    "key_17": "vvvvvvvv",
+    "key_18": "vvvvvvvv",
+    "key_19": "vvvvvvvv",
+    "key_20": "vvvvvvvv"
+  }
+}

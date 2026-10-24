@@ -1,0 +1,1509 @@
+openapi: 3.0.3
+info:
+  title: Message Hub API
+  version: 0.1.0
+  description: |
+    HTTP contract of Message Hub. Behaviour is specified in
+    `docs/design/domain-model.md`, which is the single authority; this file
+    must agree with it.
+
+    Every response, including errors and health checks, uses the unified
+    envelope `{success, data, error, meta}`.
+
+    Roles (§9):
+    - `source`: may ingest events; may only read events and deliveries whose
+      `source` is its own principal id. Reading another source's data returns
+      **404**, not 403, so existence is not leaked.
+    - `viewer`: may read everything.
+    - `operator`: may read everything and replay / skip deliveries.
+
+    An operation a role is not allowed to perform returns 403 `forbidden`.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: events
+  - name: deliveries
+  - name: health
+
+paths:
+  /v1/events:
+    post:
+      tags: [events]
+      operationId: ingestEvent
+      summary: Ingest an event (role `source`)
+      description: |
+        Accepts one event (§3). The event `source` is the authenticated
+        principal id and must not appear in the body.
+
+        - New event: **202**, `duplicate: false`.
+        - `(source, source_event_id)` already exists: **200**, `duplicate: true`,
+          with the original `event_id`, `routing_status`, `matched_route_ids`
+          and deliveries. The payload is not compared and the event is not
+          re-routed.
+        - No route matched: still **202**, `routing_status: unrouted`,
+          `matched_route_ids: []`, `deliveries: []`. The event is stored and
+          queryable; it is never routed later automatically.
+        - `payload` larger than 262144 bytes when serialized: **413**
+          `payload_too_large`. This limit is not expressible in the schema.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestEventRequest'
+            example:
+              source_event_id: ord-20261024-0001
+              event_type: order.paid
+              occurred_at: '2026-10-24T08:30:00Z'
+              payload:
+                order_id: '1001'
+                contact_id: c-42
+                amount: 199.5
+                channel: ads
+              idempotency_key: pay-1001
+              ordering_key: contact-c-42
+              metadata:
+                trace_id: 4bf92f3577b34da6
+      responses:
+        '202':
+          description: Event accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestEventResponse'
+              examples:
+                routed:
+                  summary: Event matched routes
+                  value:
+                    success: true
+                    data:
+                      event_id: 01929a3c-5e10-7b2a-8c4d-1f2e3d4c5b6a
+                      duplicate: false
+                      routing_status: routed
+                      matched_route_ids: [order-paid]
+                      deliveries:
+                        - delivery_id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e7f
+                          destination_id: crm
+                          status: PENDING
+                        - delivery_id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e80
+                          destination_id: ads-platform
+                          status: PENDING
+                    error: null
+                    meta: {}
+                unrouted:
+                  summary: No route matched; event stored as unrouted
+                  value:
+                    success: true
+                    data:
+                      event_id: 01929a3c-6f20-7d4e-8a1b-3c4d5e6f7a8b
+                      duplicate: false
+                      routing_status: unrouted
+                      matched_route_ids: []
+                      deliveries: []
+                    error: null
+                    meta: {}
+        '200':
+          description: Duplicate submission; the original event is returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestEventResponse'
+              examples:
+                duplicate:
+                  summary: Same (source, source_event_id) submitted again
+                  value:
+                    success: true
+                    data:
+                      event_id: 01929a3c-5e10-7b2a-8c4d-1f2e3d4c5b6a
+                      duplicate: true
+                      routing_status: routed
+                      matched_route_ids: [order-paid]
+                      deliveries:
+                        - delivery_id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e7f
+                          destination_id: crm
+                          status: SUCCEEDED
+                    error: null
+                    meta: {}
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/Internal'
+    get:
+      tags: [events]
+      operationId: listEvents
+      summary: List events (all roles)
+      description: |
+        Newest first, cursor paginated. A `source` principal only sees its own
+        events. Payloads and deliveries are not included; use the detail
+        endpoint.
+      parameters:
+        - name: source_event_id
+          in: query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - name: event_type
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+            pattern: '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$'
+        - name: ordering_key
+          in: query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - name: routing_status
+          in: query
+          description: Only events with this routing result.
+          schema:
+            $ref: '#/components/schemas/RoutingStatus'
+        - name: status
+          in: query
+          description: Only events having at least one delivery in this status.
+          schema:
+            $ref: '#/components/schemas/DeliveryStatus'
+        - name: received_from
+          in: query
+          description: Inclusive lower bound on `received_at`.
+          schema:
+            type: string
+            format: date-time
+        - name: received_to
+          in: query
+          description: Exclusive upper bound on `received_at`.
+          schema:
+            type: string
+            format: date-time
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of events.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventListResponse'
+              example:
+                success: true
+                data:
+                  - id: 01929a3c-6f20-7d4e-8a1b-3c4d5e6f7a8b
+                    source: order-service
+                    source_event_id: ord-20261024-0002
+                    event_type: order.refunded
+                    occurred_at: '2026-10-24T08:31:00Z'
+                    received_at: '2026-10-24T08:31:00.412Z'
+                    ingest_seq: 1043
+                    idempotency_key: null
+                    ordering_key: null
+                    metadata: {}
+                    routing_status: unrouted
+                    matched_route_ids: []
+                    routing_config_hash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+                  - id: 01929a3c-5e10-7b2a-8c4d-1f2e3d4c5b6a
+                    source: order-service
+                    source_event_id: ord-20261024-0001
+                    event_type: order.paid
+                    occurred_at: '2026-10-24T08:30:00Z'
+                    received_at: '2026-10-24T08:30:00.127Z'
+                    ingest_seq: 1042
+                    idempotency_key: pay-1001
+                    ordering_key: contact-c-42
+                    metadata:
+                      trace_id: 4bf92f3577b34da6
+                    routing_status: routed
+                    matched_route_ids: [order-paid]
+                    routing_config_hash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+                error: null
+                meta:
+                  next_cursor: eyJpbmdlc3Rfc2VxIjoxMDQyfQ
+                  limit: 2
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /v1/events/{event_id}:
+    get:
+      tags: [events]
+      operationId: getEvent
+      summary: Get an event with payload and delivery summaries (all roles)
+      description: |
+        A `source` principal requesting another source's event gets 404.
+        Each delivery carries the derived `blocked_by` field (§6).
+      parameters:
+        - $ref: '#/components/parameters/EventID'
+      responses:
+        '200':
+          description: The event.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventDetailResponse'
+              example:
+                success: true
+                data:
+                  id: 01929a3c-5e10-7b2a-8c4d-1f2e3d4c5b6a
+                  source: order-service
+                  source_event_id: ord-20261024-0001
+                  event_type: order.paid
+                  occurred_at: '2026-10-24T08:30:00Z'
+                  received_at: '2026-10-24T08:30:00.127Z'
+                  ingest_seq: 1042
+                  idempotency_key: pay-1001
+                  ordering_key: contact-c-42
+                  metadata:
+                    trace_id: 4bf92f3577b34da6
+                  routing_status: routed
+                  matched_route_ids: [order-paid]
+                  routing_config_hash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+                  payload:
+                    order_id: '1001'
+                    contact_id: c-42
+                    amount: 199.5
+                    channel: ads
+                  deliveries:
+                    - id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e7f
+                      event_id: 01929a3c-5e10-7b2a-8c4d-1f2e3d4c5b6a
+                      destination_id: crm
+                      policy_id: default
+                      status: PENDING
+                      ordering_key: contact-c-42
+                      attempt_count: 0
+                      replay_count: 0
+                      scheduled_at: '2026-10-24T08:30:00.127Z'
+                      last_attempt_at: null
+                      last_outcome: null
+                      last_status_code: null
+                      last_error: null
+                      blocked_by: 01929a30-1a2b-7c3d-8e4f-5a6b7c8d9e0f
+                      created_at: '2026-10-24T08:30:00.127Z'
+                      updated_at: '2026-10-24T08:30:00.127Z'
+                      completed_at: null
+                error: null
+                meta: {}
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /v1/deliveries:
+    get:
+      tags: [deliveries]
+      operationId: listDeliveries
+      summary: List deliveries (all roles)
+      description: |
+        Newest first, cursor paginated. A `source` principal only sees
+        deliveries of its own events. Attempts are not included.
+      parameters:
+        - name: event_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: destination_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/ConfigID'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/DeliveryStatus'
+        - name: created_from
+          in: query
+          description: Inclusive lower bound on `created_at`.
+          schema:
+            type: string
+            format: date-time
+        - name: created_to
+          in: query
+          description: Exclusive upper bound on `created_at`.
+          schema:
+            type: string
+            format: date-time
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of deliveries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryListResponse'
+              example:
+                success: true
+                data:
+                  - id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e80
+                    event_id: 01929a3c-5e10-7b2a-8c4d-1f2e3d4c5b6a
+                    destination_id: ads-platform
+                    policy_id: default
+                    status: DEAD
+                    ordering_key: null
+                    attempt_count: 8
+                    replay_count: 0
+                    scheduled_at: '2026-10-24T09:41:12Z'
+                    last_attempt_at: '2026-10-24T09:41:12Z'
+                    last_outcome: retryable
+                    last_status_code: 503
+                    last_error: null
+                    blocked_by: null
+                    created_at: '2026-10-24T08:30:00.127Z'
+                    updated_at: '2026-10-24T09:41:12.880Z'
+                    completed_at: '2026-10-24T09:41:12.880Z'
+                error: null
+                meta:
+                  next_cursor: null
+                  limit: 50
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /v1/deliveries/{delivery_id}:
+    get:
+      tags: [deliveries]
+      operationId: getDelivery
+      summary: Get a delivery with its attempts (all roles)
+      description: |
+        `cursor` and `limit` paginate the embedded `attempts` (newest first);
+        `meta.next_cursor` refers to attempts. A `source` principal requesting
+        a delivery of another source's event gets 404.
+      parameters:
+        - $ref: '#/components/parameters/DeliveryID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: The delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryDetailResponse'
+              example:
+                success: true
+                data:
+                  id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e7f
+                  event_id: 01929a3c-5e10-7b2a-8c4d-1f2e3d4c5b6a
+                  destination_id: crm
+                  policy_id: default
+                  status: RETRY_SCHEDULED
+                  ordering_key: contact-c-42
+                  attempt_count: 1
+                  replay_count: 0
+                  scheduled_at: '2026-10-24T08:30:05.400Z'
+                  last_attempt_at: '2026-10-24T08:30:00.200Z'
+                  last_outcome: retryable
+                  last_status_code: 503
+                  last_error: null
+                  blocked_by: null
+                  created_at: '2026-10-24T08:30:00.127Z'
+                  updated_at: '2026-10-24T08:30:00.400Z'
+                  completed_at: null
+                  attempts:
+                    - id: 01929a3c-5f00-7a1b-8c2d-3e4f5a6b7c8d
+                      delivery_id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e7f
+                      number: 1
+                      trigger: auto
+                      started_at: '2026-10-24T08:30:00.200Z'
+                      duration_ms: 182
+                      outcome: retryable
+                      status_code: 503
+                      error: null
+                      request:
+                        method: POST
+                        url: https://crm.example.com/contacts/c-42/status
+                        headers:
+                          Content-Type: application/json
+                          Authorization: '***'
+                        body: '{"paid_at":"2026-10-24T08:30:00Z","status":"paid"}'
+                        truncated: false
+                      response:
+                        status_code: 503
+                        content_type: text/plain
+                        body: upstream unavailable
+                        truncated: false
+                      config_hash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+                      next_attempt_at: '2026-10-24T08:30:05.400Z'
+                error: null
+                meta:
+                  next_cursor: null
+                  limit: 50
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /v1/deliveries/{delivery_id}/replay:
+    post:
+      tags: [deliveries]
+      operationId: replayDelivery
+      summary: Replay a delivery (role `operator`)
+      description: |
+        Allowed from `DEAD`, `SUCCEEDED` and `SKIPPED` (§5.2). The delivery
+        returns to `PENDING`, `replay_count` increases by 1, `attempt_count`
+        resets to 0 and an operator action is recorded. Any other status
+        returns 409 `invalid_state`.
+      parameters:
+        - $ref: '#/components/parameters/DeliveryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorActionRequest'
+            example:
+              reason: CRM restored from backup; resend
+      responses:
+        '202':
+          description: Replay accepted; the delivery is PENDING again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorActionResponse'
+              example:
+                success: true
+                data:
+                  action_id: 01929b10-0a1b-7c2d-8e3f-4a5b6c7d8e9f
+                  action: replay
+                  delivery_id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e80
+                  actor: ops-alice
+                  reason: CRM restored from backup; resend
+                  from_status: DEAD
+                  to_status: PENDING
+                  created_at: '2026-10-24T10:00:00Z'
+                error: null
+                meta: {}
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/InvalidState'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /v1/deliveries/{delivery_id}/skip:
+    post:
+      tags: [deliveries]
+      operationId: skipDelivery
+      summary: Skip a dead delivery (role `operator`)
+      description: |
+        Only allowed from `DEAD`; the delivery becomes `SKIPPED`, which settles
+        it for ordered delivery (§6). Any other status returns 409
+        `invalid_state`.
+      parameters:
+        - $ref: '#/components/parameters/DeliveryID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorActionRequest'
+            example:
+              reason: Contact deleted in CRM; unblock later updates
+      responses:
+        '200':
+          description: The delivery is SKIPPED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorActionResponse'
+              example:
+                success: true
+                data:
+                  action_id: 01929b11-1b2c-7d3e-8f4a-5b6c7d8e9f0a
+                  action: skip
+                  delivery_id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e80
+                  actor: ops-alice
+                  reason: Contact deleted in CRM; unblock later updates
+                  from_status: DEAD
+                  to_status: SKIPPED
+                  created_at: '2026-10-24T10:05:00Z'
+                error: null
+                meta: {}
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/InvalidState'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /healthz:
+    get:
+      tags: [health]
+      operationId: healthz
+      summary: Liveness probe (no authentication)
+      security: []
+      responses:
+        '200':
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                success: true
+                data:
+                  status: ok
+                error: null
+                meta: {}
+
+  /readyz:
+    get:
+      tags: [health]
+      operationId: readyz
+      summary: Readiness probe (no authentication)
+      description: Ready when the database is reachable and configuration is loaded.
+      security: []
+      responses:
+        '200':
+          description: Ready to serve traffic.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                success: true
+                data:
+                  status: ok
+                error: null
+                meta: {}
+        '503':
+          description: Not ready. Uses error code `internal`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                success: false
+                data: null
+                error:
+                  code: internal
+                  message: database is not reachable
+                  details: []
+                meta: {}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer <api_key>`. The Hub hashes the key with SHA-256
+        and looks up the principal; unknown keys return 401.
+
+  parameters:
+    EventID:
+      name: event_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DeliveryID:
+      name: delivery_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous page's `meta.next_cursor`.
+      schema:
+        type: string
+        minLength: 1
+    Limit:
+      name: limit
+      in: query
+      description: Page size.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+
+  responses:
+    ValidationFailed:
+      description: The request failed validation (`validation_failed`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            success: false
+            data: null
+            error:
+              code: validation_failed
+              message: request validation failed
+              details:
+                - field: event_type
+                  reason: must match ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$
+                - field: source
+                  reason: is not an allowed field
+            meta: {}
+    Unauthenticated:
+      description: Missing or unknown API key (`unauthenticated`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            success: false
+            data: null
+            error:
+              code: unauthenticated
+              message: missing or invalid API key
+              details: []
+            meta: {}
+    Forbidden:
+      description: The principal's role does not allow this operation (`forbidden`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            success: false
+            data: null
+            error:
+              code: forbidden
+              message: role viewer may not perform this operation
+              details: []
+            meta: {}
+    NotFound:
+      description: |
+        The resource does not exist, or belongs to another source when the
+        caller has role `source` (`not_found`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            success: false
+            data: null
+            error:
+              code: not_found
+              message: event not found
+              details: []
+            meta: {}
+    InvalidState:
+      description: The delivery's status does not allow this operation (`invalid_state`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            success: false
+            data: null
+            error:
+              code: invalid_state
+              message: cannot skip a delivery in status IN_FLIGHT
+              details: []
+            meta: {}
+    PayloadTooLarge:
+      description: Serialized `payload` exceeds 262144 bytes (`payload_too_large`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            success: false
+            data: null
+            error:
+              code: payload_too_large
+              message: payload exceeds 262144 bytes
+              details: []
+            meta: {}
+    RateLimited:
+      description: Reserved for Phase 6 (`rate_limited`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            success: false
+            data: null
+            error:
+              code: rate_limited
+              message: too many requests
+              details: []
+            meta: {}
+    Internal:
+      description: Unexpected server error (`internal`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            success: false
+            data: null
+            error:
+              code: internal
+              message: internal error
+              details: []
+            meta: {}
+
+  schemas:
+    # ---------------------------------------------------------------- envelope
+    SuccessEnvelope:
+      type: object
+      description: |
+        Base of every successful response. Concrete responses extend it with
+        a typed `data` via `allOf`.
+      required: [success, data, error, meta]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        error:
+          type: object
+          nullable: true
+          description: Always null on success.
+        meta:
+          $ref: '#/components/schemas/Meta'
+      example:
+        success: true
+        data: {}
+        error: null
+        meta: {}
+    ErrorEnvelope:
+      type: object
+      required: [success, data, error, meta]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        data:
+          type: object
+          nullable: true
+          description: Always null on error.
+        error:
+          $ref: '#/components/schemas/Error'
+        meta:
+          $ref: '#/components/schemas/Meta'
+      example:
+        success: false
+        data: null
+        error:
+          code: not_found
+          message: delivery not found
+          details: []
+        meta: {}
+    Error:
+      type: object
+      required: [code, message, details]
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+        details:
+          type: array
+          description: Field-level problems; empty when not applicable.
+          items:
+            $ref: '#/components/schemas/ErrorDetail'
+      example:
+        code: validation_failed
+        message: request validation failed
+        details:
+          - field: occurred_at
+            reason: must be an RFC 3339 date-time with time zone
+    ErrorDetail:
+      type: object
+      required: [field, reason]
+      properties:
+        field:
+          type: string
+          description: Field path, e.g. `metadata.trace_id`; empty for the whole body.
+        reason:
+          type: string
+      example:
+        field: event_type
+        reason: is required
+    ErrorCode:
+      type: string
+      description: |
+        400 `validation_failed`, 401 `unauthenticated`, 403 `forbidden`,
+        404 `not_found`, 409 `invalid_state`, 413 `payload_too_large`,
+        429 `rate_limited` (reserved, Phase 6), 500 `internal`.
+      enum:
+        - validation_failed
+        - unauthenticated
+        - forbidden
+        - not_found
+        - invalid_state
+        - payload_too_large
+        - rate_limited
+        - internal
+      example: not_found
+    Meta:
+      type: object
+      description: Response metadata. Empty unless the response is paginated.
+      example: {}
+    PageMeta:
+      type: object
+      required: [next_cursor, limit]
+      properties:
+        next_cursor:
+          type: string
+          nullable: true
+          description: Cursor for the next page; null on the last page.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+      example:
+        next_cursor: eyJpbmdlc3Rfc2VxIjoxMDQyfQ
+        limit: 50
+
+    # ------------------------------------------------------------ enumerations
+    RoutingStatus:
+      type: string
+      description: |
+        `routed`: at least one destination matched. `unrouted`: no route
+        matched; `matched_route_ids` and `deliveries` are empty.
+      enum: [routed, unrouted]
+      example: routed
+    DeliveryStatus:
+      type: string
+      description: Terminal statuses are SUCCEEDED, DEAD and SKIPPED (§5.1).
+      enum: [PENDING, IN_FLIGHT, RETRY_SCHEDULED, SUCCEEDED, DEAD, SKIPPED]
+      example: PENDING
+    Outcome:
+      type: string
+      enum: [success, retryable, permanent, render_error, infra_error]
+      example: retryable
+    AttemptTrigger:
+      type: string
+      enum: [auto, replay]
+      example: auto
+    ConfigID:
+      type: string
+      description: Id of a configured principal, policy, destination or route.
+      pattern: '^[a-z][a-z0-9-]{1,62}$'
+      example: crm
+    ConfigHash:
+      type: string
+      description: Lowercase hex SHA-256 of the canonical configuration.
+      pattern: '^[0-9a-f]{64}$'
+      example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+
+    # ------------------------------------------------------------------ ingest
+    IngestEventRequest:
+      type: object
+      description: |
+        Event envelope (§2). No other fields are allowed; in particular
+        `source` is derived from the API key and must not be sent.
+
+        Rules the schema cannot express, enforced by the server
+        (`domain.ParseEnvelope`):
+        - every `metadata` key must match `^[a-zA-Z0-9_.-]{1,64}$`;
+        - serialized `payload` must be at most 262144 bytes (else 413).
+      required: [source_event_id, event_type, occurred_at, payload]
+      additionalProperties: false
+      properties:
+        source_event_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Deduplication key together with the caller's `source`.
+        event_type:
+          type: string
+          maxLength: 100
+          pattern: '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$'
+          example: order.paid
+        occurred_at:
+          type: string
+          format: date-time
+          pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'
+          description: RFC 3339 date-time with time zone.
+        payload:
+          type: object
+          description: Any JSON object (`{}` is valid); at most 262144 bytes serialized.
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Opaque; passed to destinations via `{{event.idempotency_key}}`.
+        ordering_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: "Only effective with policy `ordering.mode: per_key`."
+        metadata:
+          type: object
+          description: |
+            String-to-string map, at most 20 entries. Keys must match
+            `^[a-zA-Z0-9_.-]{1,64}$` (enforced by the server only); values
+            are at most 256 characters.
+          maxProperties: 20
+          additionalProperties:
+            type: string
+            maxLength: 256
+      example:
+        source_event_id: ord-20261024-0001
+        event_type: order.paid
+        occurred_at: '2026-10-24T08:30:00Z'
+        payload:
+          order_id: '1001'
+        metadata:
+          trace_id: 4bf92f3577b34da6
+    IngestResult:
+      type: object
+      required: [event_id, duplicate, routing_status, matched_route_ids, deliveries]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        duplicate:
+          type: boolean
+          description: True when the original event of a duplicate submission is returned.
+        routing_status:
+          $ref: '#/components/schemas/RoutingStatus'
+        matched_route_ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigID'
+        deliveries:
+          type: array
+          items:
+            $ref: '#/components/schemas/IngestDelivery'
+      example:
+        event_id: 01929a3c-6f20-7d4e-8a1b-3c4d5e6f7a8b
+        duplicate: false
+        routing_status: unrouted
+        matched_route_ids: []
+        deliveries: []
+    IngestDelivery:
+      type: object
+      required: [delivery_id, destination_id, status]
+      properties:
+        delivery_id:
+          type: string
+          format: uuid
+        destination_id:
+          $ref: '#/components/schemas/ConfigID'
+        status:
+          $ref: '#/components/schemas/DeliveryStatus'
+      example:
+        delivery_id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e7f
+        destination_id: crm
+        status: PENDING
+    IngestEventResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/IngestResult'
+      example:
+        success: true
+        data:
+          event_id: 01929a3c-6f20-7d4e-8a1b-3c4d5e6f7a8b
+          duplicate: false
+          routing_status: unrouted
+          matched_route_ids: []
+          deliveries: []
+        error: null
+        meta: {}
+
+    # ------------------------------------------------------------------ events
+    EventSummary:
+      type: object
+      required:
+        - id
+        - source
+        - source_event_id
+        - event_type
+        - occurred_at
+        - received_at
+        - ingest_seq
+        - idempotency_key
+        - ordering_key
+        - metadata
+        - routing_status
+        - matched_route_ids
+        - routing_config_hash
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUIDv7.
+        source:
+          $ref: '#/components/schemas/ConfigID'
+        source_event_id:
+          type: string
+        event_type:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+        received_at:
+          type: string
+          format: date-time
+        ingest_seq:
+          type: integer
+          format: int64
+          description: Global, monotonically increasing acceptance order.
+        idempotency_key:
+          type: string
+          nullable: true
+        ordering_key:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        routing_status:
+          $ref: '#/components/schemas/RoutingStatus'
+        matched_route_ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigID'
+        routing_config_hash:
+          $ref: '#/components/schemas/ConfigHash'
+      example:
+        id: 01929a3c-6f20-7d4e-8a1b-3c4d5e6f7a8b
+        source: order-service
+        source_event_id: ord-20261024-0002
+        event_type: order.refunded
+        occurred_at: '2026-10-24T08:31:00Z'
+        received_at: '2026-10-24T08:31:00.412Z'
+        ingest_seq: 1043
+        idempotency_key: null
+        ordering_key: null
+        metadata: {}
+        routing_status: unrouted
+        matched_route_ids: []
+        routing_config_hash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+    EventDetail:
+      allOf:
+        - $ref: '#/components/schemas/EventSummary'
+        - type: object
+          required: [payload, deliveries]
+          properties:
+            payload:
+              type: object
+            deliveries:
+              type: array
+              items:
+                $ref: '#/components/schemas/Delivery'
+      example:
+        id: 01929a3c-6f20-7d4e-8a1b-3c4d5e6f7a8b
+        source: order-service
+        source_event_id: ord-20261024-0002
+        event_type: order.refunded
+        occurred_at: '2026-10-24T08:31:00Z'
+        received_at: '2026-10-24T08:31:00.412Z'
+        ingest_seq: 1043
+        idempotency_key: null
+        ordering_key: null
+        metadata: {}
+        routing_status: unrouted
+        matched_route_ids: []
+        routing_config_hash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        payload:
+          order_id: '1001'
+        deliveries: []
+    EventDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/EventDetail'
+    EventListResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/EventSummary'
+            meta:
+              $ref: '#/components/schemas/PageMeta'
+
+    # -------------------------------------------------------------- deliveries
+    Delivery:
+      type: object
+      required:
+        - id
+        - event_id
+        - destination_id
+        - policy_id
+        - status
+        - ordering_key
+        - attempt_count
+        - replay_count
+        - scheduled_at
+        - last_attempt_at
+        - last_outcome
+        - last_status_code
+        - last_error
+        - blocked_by
+        - created_at
+        - updated_at
+        - completed_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        event_id:
+          type: string
+          format: uuid
+        destination_id:
+          $ref: '#/components/schemas/ConfigID'
+        policy_id:
+          $ref: '#/components/schemas/ConfigID'
+        status:
+          $ref: '#/components/schemas/DeliveryStatus'
+        ordering_key:
+          type: string
+          nullable: true
+        attempt_count:
+          type: integer
+          minimum: 0
+          description: Attempts in the current round; reset to 0 by replay.
+        replay_count:
+          type: integer
+          minimum: 0
+        scheduled_at:
+          type: string
+          format: date-time
+        last_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_outcome:
+          allOf:
+            - $ref: '#/components/schemas/Outcome'
+          nullable: true
+        last_status_code:
+          type: integer
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+        blocked_by:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            Derived, not stored (§6). For an ordered delivery that cannot be
+            claimed yet, the id of the earliest unsettled predecessor with the
+            same `(destination_id, ordering_key)`; otherwise null.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+      example:
+        id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e7f
+        event_id: 01929a3c-5e10-7b2a-8c4d-1f2e3d4c5b6a
+        destination_id: crm
+        policy_id: default
+        status: SUCCEEDED
+        ordering_key: null
+        attempt_count: 1
+        replay_count: 0
+        scheduled_at: '2026-10-24T08:30:00.127Z'
+        last_attempt_at: '2026-10-24T08:30:00.200Z'
+        last_outcome: success
+        last_status_code: 200
+        last_error: null
+        blocked_by: null
+        created_at: '2026-10-24T08:30:00.127Z'
+        updated_at: '2026-10-24T08:30:00.390Z'
+        completed_at: '2026-10-24T08:30:00.390Z'
+    DeliveryDetail:
+      allOf:
+        - $ref: '#/components/schemas/Delivery'
+        - type: object
+          required: [attempts]
+          properties:
+            attempts:
+              type: array
+              description: Newest first; paginated by `cursor` / `limit`.
+              items:
+                $ref: '#/components/schemas/Attempt'
+    DeliveryDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/DeliveryDetail'
+            meta:
+              $ref: '#/components/schemas/PageMeta'
+    DeliveryListResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Delivery'
+            meta:
+              $ref: '#/components/schemas/PageMeta'
+
+    # ---------------------------------------------------------------- attempts
+    Attempt:
+      type: object
+      description: One HTTP call (§10). Append-only.
+      required:
+        - id
+        - delivery_id
+        - number
+        - trigger
+        - started_at
+        - duration_ms
+        - outcome
+        - status_code
+        - error
+        - request
+        - response
+        - config_hash
+        - next_attempt_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        delivery_id:
+          type: string
+          format: uuid
+        number:
+          type: integer
+          minimum: 1
+          description: Sequence within the current round; restarts at 1 after replay.
+        trigger:
+          $ref: '#/components/schemas/AttemptTrigger'
+        started_at:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+          minimum: 0
+        outcome:
+          $ref: '#/components/schemas/Outcome'
+        status_code:
+          type: integer
+          nullable: true
+          description: Null when no response was received.
+        error:
+          type: string
+          nullable: true
+          description: Network error, render error category and reason, etc.
+        request:
+          allOf:
+            - $ref: '#/components/schemas/RecordedRequest'
+          nullable: true
+          description: Null when rendering failed before a request existed.
+        response:
+          allOf:
+            - $ref: '#/components/schemas/RecordedResponse'
+          nullable: true
+          description: Null when no response was received.
+        config_hash:
+          $ref: '#/components/schemas/ConfigHash'
+        next_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set when the delivery moved to RETRY_SCHEDULED.
+      example:
+        id: 01929a3c-5f00-7a1b-8c2d-3e4f5a6b7c8d
+        delivery_id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e7f
+        number: 1
+        trigger: auto
+        started_at: '2026-10-24T08:30:00.200Z'
+        duration_ms: 5001
+        outcome: retryable
+        status_code: null
+        error: 'timeout: no response within 5s'
+        request:
+          method: POST
+          url: https://crm.example.com/contacts/c-42/status
+          headers:
+            Authorization: '***'
+          body: '{"status":"paid"}'
+          truncated: false
+        response: null
+        config_hash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        next_attempt_at: '2026-10-24T08:30:10.201Z'
+    RecordedRequest:
+      type: object
+      description: |
+        Headers whose value referenced `secret.*`, and `Authorization` /
+        `Proxy-Authorization`, are recorded as `***`. Body is truncated to
+        16384 bytes.
+      required: [method, url, headers, body, truncated]
+      properties:
+        method:
+          type: string
+          enum: [POST, PUT, PATCH]
+        url:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        body:
+          type: string
+        truncated:
+          type: boolean
+      example:
+        method: POST
+        url: https://crm.example.com/contacts/c-42/status
+        headers:
+          Content-Type: application/json
+          Authorization: '***'
+        body: '{"status":"paid"}'
+        truncated: false
+    RecordedResponse:
+      type: object
+      description: Body is truncated to 16384 bytes.
+      required: [status_code, content_type, body, truncated]
+      properties:
+        status_code:
+          type: integer
+        content_type:
+          type: string
+        body:
+          type: string
+        truncated:
+          type: boolean
+      example:
+        status_code: 200
+        content_type: application/json
+        body: '{"code":0}'
+        truncated: false
+
+    # ------------------------------------------------------- operator actions
+    OperatorActionRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Recorded in the operator action audit trail.
+      example:
+        reason: Vendor outage resolved
+    OperatorAction:
+      type: object
+      required: [action_id, action, delivery_id, actor, reason, from_status, to_status, created_at]
+      properties:
+        action_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+          enum: [replay, skip]
+        delivery_id:
+          type: string
+          format: uuid
+        actor:
+          $ref: '#/components/schemas/ConfigID'
+        reason:
+          type: string
+        from_status:
+          $ref: '#/components/schemas/DeliveryStatus'
+        to_status:
+          $ref: '#/components/schemas/DeliveryStatus'
+        created_at:
+          type: string
+          format: date-time
+      example:
+        action_id: 01929b10-0a1b-7c2d-8e3f-4a5b6c7d8e9f
+        action: replay
+        delivery_id: 01929a3c-5e11-7c3b-9d5e-2a3b4c5d6e80
+        actor: ops-alice
+        reason: Vendor outage resolved
+        from_status: DEAD
+        to_status: PENDING
+        created_at: '2026-10-24T10:00:00Z'
+    OperatorActionResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/OperatorAction'
+
+    # ------------------------------------------------------------------ health
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+      example:
+        status: ok
+    HealthResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/Health'

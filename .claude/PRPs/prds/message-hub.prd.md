@@ -49,11 +49,14 @@ We'll know we're right when 首批接入业务上线后：失败消息零静默�
 - [ ] 各供应商的限流规则、幂等支持能力、认证方式（API Key / OAuth / 签名）清单
 - [ ] 事件与投递记录的数据保留时长、归档策略
 - [ ] 各供应商的脱敏要求（字段级哈希、加密存储范围）
-- [ ] 配置（路由、目标、策略）变更的管理方式：配置文件 + 版本库 / 管理 API / 审批流
+- [x] 配置（路由、目标、策略）变更的管理方式：配置文件 + 版本库 / 管理 API / 审批流 → YAML + Git，ADR-0005
 - [ ] 混合环境下的固定出口 IP 方案（供应商 IP 白名单）
 - [x] Outpost / Svix 二次开发 vs 组件自建的最终结论（Phase 1 输出）→ 自建，ADR-0001（Accepted）
 - [x] 技术栈（语言、MQ、状态存储）的最终选型（Phase 1 输出）→ Go + PostgreSQL，ADR-0002 至 0004（Accepted）
-- [ ] 有序投递的阻塞策略：同一顺序键的前序事件进入死信时，后续事件是阻塞、跳过还是一并进入死信
+- [x] 有序投递的阻塞策略：同一顺序键的前序事件进入死信时，后续事件是阻塞、跳过还是一并进入死信 → 按策略可配，默认阻塞，ADR-0007
+- [ ] `unrouted` 事件在补充路由配置后，是否需要提供"重新路由"能力（运维对已受理事件按当前配置重新匹配并生成 Delivery）
+- [x] secret manager 选型与密钥注入方式 → 当前阶段 Kubernetes Secret（ADR-0008 D3，`docs/deploy/k8s-secrets.md`）
+- [ ] 后续接入的 secret manager（Vault / 云 KMS 等），以及非 Kubernetes 环境（虚拟机）的密钥注入方式
 
 ---
 
@@ -83,7 +86,7 @@ When 我的业务发生需要通知外部供应商的关键事件, I want to 按
 
 ## Solution Detail
 
-### 核心概念模型（草案，Phase 2 细化）
+### 核心概念模型（草案；字段级定义与行为规格见 [docs/design/domain-model.md](../../../docs/design/domain-model.md)）
 
 | 概念 | 说明 |
 |------|------|
@@ -196,7 +199,7 @@ PENDING → IN_FLIGHT → SUCCEEDED
 | # | Phase | Description | Status | Parallel | Depends | PRP Plan |
 |---|-------|-------------|--------|----------|---------|----------|
 | 1 | 技术验证与选型 | Outpost / Svix 对照评估，确定自建 vs 二次开发；确定语言、MQ、状态存储 | complete | - | - | [plan](../plans/completed/tech-spike-and-selection.plan.md) · [report](../reports/tech-spike-and-selection-report.md) |
-| 2 | 领域模型与契约 | 统一事件格式、配置模型（Destination / Route / Policy）、状态机、API 契约、数据库 schema | in-progress | - | 1 | [domain-model-and-contracts.plan.md](../plans/domain-model-and-contracts.plan.md) |
+| 2 | 领域模型与契约 | 统一事件格式、配置模型（Destination / Route / Policy）、状态机、API 契约、数据库 schema | complete | - | 1 | [plan](../plans/completed/domain-model-and-contracts.plan.md) · [report](../reports/domain-model-and-contracts-report.md) |
 | 3 | 受理与查询 | Ingest API、持久化、去重、状态查询 API、权限 | pending | with 4 | 2 | - |
 | 4 | 投递引擎 | 路由扇出、模板构造、认证、发送、成功判定、重试、死信 | pending | with 3 | 2 | - |
 | 5 | 运维能力 | 人工重放、指标 / 追踪 / 日志、告警、对账任务 | pending | with 6 | 3, 4 | - |
@@ -267,6 +270,11 @@ PENDING → IN_FLIGHT → SUCCEEDED
 | 实现语言 | Go（[ADR-0002](../../../docs/adr/0002-implementation-language.md)，Accepted） | Java、TypeScript、Rust | 加权 76/85；单一二进制适合混合环境；AI 编码友好；与借鉴代码同语言 |
 | 分发与重试 | MVP 只用 PostgreSQL（SKIP LOCKED + LISTEN/NOTIFY），通过 Dispatcher 接口可演进（[ADR-0003](../../../docs/adr/0003-dispatch-and-retry-queue.md)，Accepted） | PG+Kafka、PG+Redis、PG+RabbitMQ | 加权 64/75；受理事务即 outbox，从架构上保证零静默丢失；组件最少 |
 | 状态存储 | PostgreSQL，Attempt 同库分区，可演进到列存（[ADR-0004](../../../docs/adr/0004-state-store.md)，Accepted） | MySQL 8 | 加权 58/60；部分索引与 NOTIFY 是 ADR-0003 的前提 |
+| 配置管理 | YAML + Git，CI 校验，凭据只写 `env:` 引用（[ADR-0005](../../../docs/adr/0005-config-as-yaml-in-git.md)） | DB + Admin API；两者都做 | 配置变更直接影响对外请求，先评审后生效；Git 自带审计 |
+| 模板能力 | 字段路径 + 12 个固定内置函数，无条件与循环（[ADR-0006](../../../docs/adr/0006-template-language-scope.md)） | 只做字段映射；Go text/template | 覆盖哈希、签名等需求，同时保持可预测、易评审 |
+| 有序投递 | 按 `(destination, ordering_key)` 保证受理顺序；前序 DEAD 时按策略 block / skip，默认 block（[ADR-0007](../../../docs/adr/0007-ordering-semantics.md)） | 一律阻塞；一律跳过 | 库存类业务需要阻塞，其他业务可选跳过 |
+| 无匹配路由的记录方式 | 显式 `routing_status`（routed / unrouted）+ `routing_config_hash`，数据库约束保证一致 | 只看 `matched_route_ids` 是否为空 | 用户要求（2026-10-24）；便于筛选、统计与告警 |
+| 密钥管理 | 配置只写 `env:` 引用；敏感名称字段禁止字面量（`allow_literal` 显式例外）；attempt 记录在截断前脱敏；密钥只从环境变量注入；入站 API Key 为 256 位随机值并支持双哈希轮换（[ADR-0008](../../../docs/adr/0008-secrets-management.md)） | 依赖评审发现明文；只对 Header 脱敏 | 用户要求（2026-10-24）；把"禁止明文"做成加载失败，配置校验与记录脱敏共用一条规则 |
 | 部署 | 混合环境 | 单一云 / 单一 IDC | 业务要求 |
 | 范围边界 | 只聚焦 Hub 模块本身 | 同时设计上下游交互 | 系统间交互在更高维度讨论 |
 | 交付方式 | AI Vibe Coding，尽快上线 | 传统排期 | 业务决策；以规格与测试作质量护栏 |
