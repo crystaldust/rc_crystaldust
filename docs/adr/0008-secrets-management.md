@@ -37,11 +37,12 @@ attempt 记录在截断前完成脱敏，覆盖 Header、URL、Body 三个位置
 OAuth2 获取 token 的请求与响应不写入 attempt 记录。
 
 ### D3 密钥只在运行时注入（针对 G3）
-- 密钥值只来自 **Hub 进程的环境变量**
-- 生产与预发环境：由部署平台从 secret manager 注入环境变量。**具体选用哪个 secret manager 尚未确定**（列入 PRD Open Questions），候选包括：
-  - HashiCorp Vault（混合环境通用，可跨 IDC 与云）
-  - Kubernetes Secret（需配合 etcd 加密或外部 KMS 插件）
-  - 云厂商 KMS / Secrets Manager（只适用于云上部分）
+- 密钥值只来自 **Hub 进程的环境变量**，配置中以 `env:NAME` 引用
+- **当前阶段：Kubernetes Secret**（用户确认，2026-10-24）。Secret 通过 `envFrom` / `secretKeyRef` 注入为环境变量，Hub 代码不依赖 Kubernetes API。清单示例、集群侧安全前提（etcd 加密、RBAC、命名空间隔离等）与轮换流程见 `docs/deploy/k8s-secrets.md`
+- **后续接入其他 secret manager**：
+  - Kubernetes 环境：通过 External Secrets Operator 或 Vault Agent Injector 把 Vault、云厂商 secret 服务中的密钥同步为 Kubernetes Secret，Hub 不改代码
+  - 非 Kubernetes 环境（虚拟机等）：按引用前缀扩展解析器（如 `vault:`、`file:`）。新前缀在解析器实现并测试完成后才加入 schema，schema 不接受尚未实现的前缀
+- `config.RequiredEnv()` 列出配置引用的全部环境变量名，用于生成 Secret 的键清单和启动时的存在性检查
 - 本地开发：开发者在自己的 shell 中设置环境变量，使用开发专用的假密钥
 - 仓库中**禁止**出现 `.env`、`.env.*` 文件：已加入 `.gitignore`（`.env.example` 除外，且只能包含变量名、不含值）；`make check-secrets` 在发现被 Git 跟踪的 `.env` 文件时失败
 - 密钥轮换不需要修改配置文件；ConfigHash 只基于引用名计算，因此轮换不改变哈希
@@ -81,10 +82,20 @@ OAuth2 获取 token 的请求与响应不写入 attempt 记录。
 | attempt 记录脱敏（D2） | Phase 4 | 待实现（`docs/testing/coverage-gaps.md` B9） |
 | API Key 生成工具、启动时校验哈希格式、双哈希轮换（D4） | Phase 3 | 待实现（B10） |
 | CI 中运行密钥扫描（D1 第二道防线） | CI 建设时 | 待实现（B11） |
-| secret manager 选型与注入方式（D3） | 部署方案阶段 | 待决定（PRD Open Questions） |
+| 当前阶段采用 Kubernetes Secret（D3） | Phase 2 | ✅ 已决定；部署文档 `docs/deploy/k8s-secrets.md`；`config.RequiredEnv()` 已实现 |
+| Kubernetes 清单（Secret 模板、Deployment）落地到 `deploy/k8s/` | 部署方案阶段 | 待实现（B12） |
+| 启动时检查 `RequiredEnv()` 中的变量全部存在 | Phase 3 | 待实现（B4） |
+| 其他 secret manager（Vault、云 KMS 等）与非 Kubernetes 环境的注入 | 按需 | 待决定（PRD Open Questions） |
+
+## Revision History
+
+| 日期 | 变更 |
+|---|---|
+| 2026-10-24 | 初版：secret manager 待定 |
+| 2026-10-24 | D3 定案：当前阶段采用 Kubernetes Secret；其他 secret manager 后续通过 External Secrets Operator（K8s）或引用前缀扩展（非 K8s）接入 |
 
 ## Revisit When
 
-- 选定 secret manager 后，补充具体的注入方式与轮换流程
+- 需要支持非 Kubernetes 部署，或需要不重启即生效的密钥轮换
 - 出现敏感名称规则无法覆盖、且 `allow_literal` 难以管理的供应商命名方式
 - 需要对响应体做密钥脱敏（例如某个供应商确认会回显凭据）

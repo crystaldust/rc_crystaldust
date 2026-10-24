@@ -55,7 +55,8 @@ We'll know we're right when 首批接入业务上线后：失败消息零静默�
 - [x] 技术栈（语言、MQ、状态存储）的最终选型（Phase 1 输出）→ Go + PostgreSQL，ADR-0002 至 0004（Accepted）
 - [x] 有序投递的阻塞策略：同一顺序键的前序事件进入死信时，后续事件是阻塞、跳过还是一并进入死信 → 按策略可配，默认阻塞，ADR-0007
 - [ ] `unrouted` 事件在补充路由配置后，是否需要提供"重新路由"能力（运维对已受理事件按当前配置重新匹配并生成 Delivery）
-- [ ] secret manager 选型与密钥注入方式（Vault / Kubernetes Secret / 云 KMS，或混合使用），见 ADR-0008 D3
+- [x] secret manager 选型与密钥注入方式 → 当前阶段 Kubernetes Secret（ADR-0008 D3，`docs/deploy/k8s-secrets.md`）
+- [ ] 后续接入的 secret manager（Vault / 云 KMS 等），以及非 Kubernetes 环境（虚拟机）的密钥注入方式
 
 ---
 

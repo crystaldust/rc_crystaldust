@@ -500,7 +500,8 @@ destinations:
 |---|---|
 | Principal 的认证 | 配置中只有 `env:` 引用；运行时读取环境变量得到 key 的 SHA-256，再构建"哈希 → Principal"查找表（Phase 3） |
 | 重复的 `api_key_sha256_ref` | 加载失败，因为认证会产生歧义 |
-| 密钥值的来源 | 只来自进程环境变量，由部署平台从 secret manager 注入；仓库中禁止出现 `.env` 文件（ADR-0008） |
+| 密钥值的来源 | 只来自进程环境变量；当前阶段由 Kubernetes Secret 注入（`docs/deploy/k8s-secrets.md`）；仓库中禁止出现 `.env` 文件（ADR-0008） |
+| 引用前缀 | 目前只支持 `env:`；`config.RequiredEnv()` 列出全部被引用的变量名。新前缀（如 `vault:`、`file:`）在解析器实现后才加入 schema |
 | 密钥轮换与 ConfigHash | ConfigHash 只基于引用名计算，轮换密钥值不改变哈希；需要追溯时以部署记录为准 |
 | ConfigHash 的计算范围 | 对**填充默认值之后**的配置计算；修改注释、显式写出默认值不改变哈希；duration 按原文参与计算（`5s` 与 `5000ms` 哈希不同） |
 | 重复路由的 warning | 同一 `event_type` 的两个 route 指向同一 destination 即给出 warning，不分析 `sources` / `match` 条件是否重叠 |
