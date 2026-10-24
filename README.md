@@ -12,10 +12,19 @@
 
 # 整体架构与核心设计
 
-业务系统产生的message --> [输入队列] --> [持久化存储] --> Message Hub处理  --> [输出队列] --> 外部系统
-                                         | 					|
-                                         |					|
-                     业务系统可查询 -->  状态更新  <--  格式处理、限流、调度、状态跟踪、fallback处理
+```mermaid
+flowchart LR
+    MSG["业务系统产生的 message"] --> INQ[["输入队列"]]
+    INQ --> STORE[("持久化存储")]
+    STORE --> HUB["Message Hub 处理"]
+    HUB --> OUTQ[["输出队列"]]
+    OUTQ --> EXT["外部系统"]
+
+    HUB --- PROC["格式处理、限流、调度、<br/>状态跟踪、fallback 处理"]
+    PROC --> STATE["状态更新"]
+    STORE --- STATE
+    QUERY["业务系统可查询"] --> STATE
+```
 
 
 # 关键工程决策与取舍说明
